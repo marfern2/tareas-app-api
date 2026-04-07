@@ -1,0 +1,46 @@
+2026-03-23 13:36:58 [main] INFO  com.tareas.app.TareasAppApplication - Starting TareasAppApplication using Java 21.0.4 with PID 3100 (C:\Users\marco\IdeaProjects\tareas-app\build\classes\java\main started by marco in C:\Users\marco\IdeaProjects\tareas-app)
+2026-03-23 13:36:58 [main] DEBUG com.tareas.app.TareasAppApplication - Running with Spring Boot v4.0.3, Spring v7.0.5
+2026-03-23 13:36:58 [main] INFO  com.tareas.app.TareasAppApplication - No active profile set, falling back to 1 default profile: "default"
+2026-03-23 13:36:58 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-03-23 13:36:59 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 185 ms. Found 2 JPA repository interfaces.
+2026-03-23 13:36:59 [main] INFO  o.s.boot.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-03-23 13:36:59 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-03-23 13:36:59 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/11.0.18]
+2026-03-23 13:36:59 [main] INFO  o.s.b.w.c.s.WebApplicationContextInitializer - Root WebApplicationContext: initialization completed in 1641 ms
+2026-03-23 13:37:00 [main] INFO  o.s.o.j.p.SpringPersistenceUnitInfo - No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-03-23 13:37:00 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-03-23 13:37:01 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection conn0: url=jdbc:h2:mem:testdb user=SA
+2026-03-23 13:37:01 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-03-23 13:37:02 [main] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-03-23 13:37:02 [main] INFO  o.s.d.j.r.q.QueryEnhancerFactories - Hibernate is in classpath; If applicable, HQL parser will be used.
+2026-03-23 13:37:03 [main] DEBUG c.t.a.s.JwtAuthenticationFilter - Filter 'jwtAuthenticationFilter' configured for use
+2026-03-23 13:37:03 [main] INFO  o.s.s.c.a.a.c.InitializeUserDetailsBeanManagerConfigurer$InitializeUserDetailsManagerConfigurer - Global AuthenticationManager configured with UserDetailsService bean with name customUserDetailsService
+2026-03-23 13:37:03 [main] WARN  o.s.b.j.a.JpaBaseConfiguration$JpaWebConfiguration - spring.jpa.open-in-view is enabled by default. Therefore, database queries may be performed during view rendering. Explicitly configure spring.jpa.open-in-view to disable this warning
+2026-03-23 13:37:03 [main] INFO  o.s.boot.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-03-23 13:37:03 [main] INFO  com.tareas.app.TareasAppApplication - Started TareasAppApplication in 5.998 seconds (process running for 7.194)
+2026-03-23 13:59:18 [http-nio-8080-exec-1] INFO  o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-03-23 13:59:18 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-03-23 13:59:18 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 54 ms
+2026-03-23 13:59:18 [http-nio-8080-exec-1] DEBUG c.t.a.s.JwtAuthenticationFilter - Procesando petición a: /auth/login
+2026-03-23 13:59:18 [http-nio-8080-exec-1] DEBUG c.t.a.s.JwtAuthenticationFilter - No hay header Authorization - petición anónima
+2026-03-23 13:59:18 [http-nio-8080-exec-1] INFO  com.tareas.app.service.AuthService - === LOGIN === Email: marcos123@gmail.com
+2026-03-23 13:59:19 [http-nio-8080-exec-1] WARN  c.t.a.e.GlobalExceptionHandler - ❌ Bad credentials: Credenciales erróneas
+2026-03-23 13:59:21 [http-nio-8080-exec-2] DEBUG c.t.a.s.JwtAuthenticationFilter - Procesando petición a: /auth/login
+2026-03-23 13:59:21 [http-nio-8080-exec-2] DEBUG c.t.a.s.JwtAuthenticationFilter - No hay header Authorization - petición anónima
+2026-03-23 13:59:21 [http-nio-8080-exec-2] INFO  com.tareas.app.service.AuthService - === LOGIN === Email: marcos123@gmail.com
+2026-03-23 13:59:21 [http-nio-8080-exec-2] WARN  c.t.a.e.GlobalExceptionHandler - ❌ Bad credentials: Credenciales erróneas
+2026-03-23 14:00:30 [http-nio-8080-exec-3] DEBUG c.t.a.s.JwtAuthenticationFilter - Procesando petición a: /auth/registro
+2026-03-23 14:00:30 [http-nio-8080-exec-3] DEBUG c.t.a.s.JwtAuthenticationFilter - No hay header Authorization - petición anónima
+2026-03-23 14:00:30 [http-nio-8080-exec-3] INFO  com.tareas.app.service.AuthService - === REGISTRO === Email: marcos@gmail.com / Username: marcos010203
+2026-03-23 14:00:30 [http-nio-8080-exec-3] INFO  com.tareas.app.service.AuthService - ✅ Usuario registrado ID: 1
+2026-03-23 14:00:41 [http-nio-8080-exec-5] DEBUG c.t.a.s.JwtAuthenticationFilter - Procesando petición a: /auth/login
+2026-03-23 14:00:41 [http-nio-8080-exec-5] DEBUG c.t.a.s.JwtAuthenticationFilter - No hay header Authorization - petición anónima
+2026-03-23 14:00:41 [http-nio-8080-exec-5] INFO  com.tareas.app.service.AuthService - === LOGIN === Email: marcos@gmail.com
+2026-03-23 14:01:06 [http-nio-8080-exec-6] DEBUG c.t.a.s.JwtAuthenticationFilter - Procesando petición a: /auth/login
+2026-03-23 14:01:06 [http-nio-8080-exec-6] DEBUG c.t.a.s.JwtAuthenticationFilter - No hay header Authorization - petición anónima
+2026-03-23 14:01:06 [http-nio-8080-exec-6] INFO  com.tareas.app.service.AuthService - === LOGIN === Email: marcos@gmail.com
+2026-03-23 14:01:21 [SpringApplicationShutdownHook] INFO  o.s.boot.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-03-23 14:01:21 [tomcat-shutdown] INFO  o.s.boot.tomcat.GracefulShutdown - Graceful shutdown complete
+2026-03-23 14:01:21 [SpringApplicationShutdownHook] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Closing JPA EntityManagerFactory for persistence unit 'default'
+2026-03-23 14:01:21 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-03-23 14:01:21 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
