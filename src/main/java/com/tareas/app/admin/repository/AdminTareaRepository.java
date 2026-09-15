@@ -13,4 +13,39 @@ public interface AdminTareaRepository extends JpaRepository<Tarea, Long> {
 
     @Query("SELECT COUNT(t) FROM Tarea t WHERE t.usuario.id = :usuarioId AND t.completada = true")
     long countCompletedByUsuarioId(@Param("usuarioId") Long usuarioId);
+
+    @Query(value = """
+            SELECT t FROM Tarea t
+            JOIN FETCH t.usuario u
+            JOIN FETCH t.tipoTarea tt
+            WHERE (:search IS NULL OR LOWER(t.titulo) LIKE LOWER(CONCAT('%', :search, '%'))
+                                  OR LOWER(t.descripcion) LIKE LOWER(CONCAT('%', :search, '%')))
+            AND (:userId IS NULL OR t.usuario.id = :userId)
+            AND (:completed IS NULL
+                 OR (:completed = true AND t.completada = true)
+                 OR (:completed = false AND (t.completada = false OR t.completada IS NULL)))
+            AND (:urgency IS NULL OR t.urgencia = :urgency)
+            AND (:taskTypeId IS NULL OR t.tipoTarea.id = :taskTypeId)
+            """,
+            countQuery = """
+            SELECT COUNT(t) FROM Tarea t
+            WHERE (:search IS NULL OR LOWER(t.titulo) LIKE LOWER(CONCAT('%', :search, '%'))
+                                  OR LOWER(t.descripcion) LIKE LOWER(CONCAT('%', :search, '%')))
+            AND (:userId IS NULL OR t.usuario.id = :userId)
+            AND (:completed IS NULL
+                 OR (:completed = true AND t.completada = true)
+                 OR (:completed = false AND (t.completada = false OR t.completada IS NULL)))
+            AND (:urgency IS NULL OR t.urgencia = :urgency)
+            AND (:taskTypeId IS NULL OR t.tipoTarea.id = :taskTypeId)
+            """)
+    Page<Tarea> findGlobalWithFilters(
+            @Param("search") String search,
+            @Param("userId") Long userId,
+            @Param("completed") Boolean completed,
+            @Param("urgency") Integer urgency,
+            @Param("taskTypeId") Long taskTypeId,
+            Pageable pageable);
+
+    @Query("SELECT t FROM Tarea t JOIN FETCH t.usuario JOIN FETCH t.tipoTarea WHERE t.id = :id")
+    java.util.Optional<Tarea> findByIdGlobal(@Param("id") Long id);
 }
