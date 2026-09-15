@@ -11,13 +11,11 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
-import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
 @Slf4j
-@Component
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
@@ -32,29 +30,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     ) throws ServletException, IOException {
 
         final String authHeader = request.getHeader("Authorization");
-        final String jwt;
-        final String username;
 
-        log.debug("Procesando petición a: {}", request.getRequestURI());
-
-        if (authHeader == null) {
-            log.debug("No hay header Authorization - petición anónima");
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        if (!authHeader.startsWith("Bearer ")) {
-            log.warn("Header Authorization no comienza con Bearer");
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        jwt = authHeader.substring(7);
-        log.debug("Token JWT recibido para validacion");
+        String jwt = authHeader.substring(7);
 
         try {
-            username = jwtService.extractUsername(jwt);
-            log.debug("Username extraído del token: {}", username);
+            String username = jwtService.extractUsername(jwt);
 
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = this.userDetailsService.loadUserByUsername(username);
@@ -69,13 +54,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             new WebAuthenticationDetailsSource().buildDetails(request)
                     );
                     SecurityContextHolder.getContext().setAuthentication(authToken);
-                    log.info("Usuario autenticado: {}", username);
-                } else {
-                    log.warn("Token inválido para usuario: {}", username);
                 }
             }
         } catch (Exception e) {
-            log.error("Error procesando token JWT: {}", e.getMessage());
+            log.debug("Error procesando token JWT: {}", e.getMessage());
         }
 
         filterChain.doFilter(request, response);

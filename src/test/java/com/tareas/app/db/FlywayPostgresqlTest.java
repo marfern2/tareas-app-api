@@ -63,32 +63,38 @@ class FlywayPostgresqlTest {
     private TareaRepository tareaRepository;
 
     @Test
-    @DisplayName("Flyway ejecuta V1+V2 en PostgreSQL vacio, validate pasa y los repositorios funcionan")
+    @DisplayName("Flyway ejecuta V1+V2+V3 en PostgreSQL vacio, validate pasa y los repositorios funcionan")
     void migracionDesdeCeroYFuncionamientoBasico() {
-        // 1. flyway_schema_history contiene exactamente V1 y V2 (success=true)
+        // 1. flyway_schema_history contiene exactamente V1, V2 y V3 (success=true)
         List<Map<String, Object>> history = jdbcTemplate.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertThat(history).hasSize(2);
+        assertThat(history).hasSize(3);
         assertThat(history.get(0).get("version")).isEqualTo("1");
         assertThat(history.get(0).get("type")).isEqualTo("SQL");
         assertThat(history.get(0).get("success")).isEqualTo(true);
         assertThat(history.get(1).get("version")).isEqualTo("2");
         assertThat(history.get(1).get("type")).isEqualTo("SQL");
         assertThat(history.get(1).get("success")).isEqualTo(true);
+        assertThat(history.get(2).get("version")).isEqualTo("3");
+        assertThat(history.get(2).get("type")).isEqualTo("SQL");
+        assertThat(history.get(2).get("success")).isEqualTo(true);
 
-        // 2. Flyway informa V1 y V2 como aplicadas y sin pendientes
+        // 2. Flyway informa V1, V2 y V3 como aplicadas y sin pendientes
         MigrationInfo[] applied = flyway.info().applied();
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "1".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "2".equals(m.getVersion().getVersion()));
+        assertThat(applied).anyMatch(m -> m.getVersion() != null && "3".equals(m.getVersion().getVersion()));
         assertThat(flyway.info().pending()).isEmpty();
 
         // 3. Las tablas existen (Hibernate validate ya ha arrancado el contexto)
         List<String> tables = jdbcTemplate.queryForList(
                 "SELECT table_name FROM information_schema.tables "
-                        + "WHERE table_schema='public' AND table_name IN ('usuarios','tipos_tarea','tareas','refresh_tokens') "
+                        + "WHERE table_schema='public' AND table_name IN ('usuarios','tipos_tarea','tareas','refresh_tokens','admin_users','admin_refresh_tokens') "
                         + "ORDER BY table_name",
                 String.class);
-        assertThat(tables).containsExactly("refresh_tokens", "tareas", "tipos_tarea", "usuarios");
+        assertThat(tables).containsExactly(
+                "admin_refresh_tokens", "admin_users",
+                "refresh_tokens", "tareas", "tipos_tarea", "usuarios");
 
         // 4. Repositorios funcionan y la identity genera IDs
         Usuario alice = Usuario.builder()
@@ -164,5 +170,40 @@ class FlywayPostgresqlTest {
                 "INSERT INTO refresh_tokens (usuario_id, token_hash, expires_at) "
                         + "VALUES (999999, 'hash-sin-usuario', now() + interval '1 day')"))
                 .isInstanceOf(DataIntegrityViolationException.class);
+
+        // 11. V3: admin_users: UNIQUE email se aplica
+        jdbcTemplate.update(
+                "INSERT INTO admin_users (username, email, password_hash, created_at) "
+                        + "VALUES ('admin1', 'admin@test.com', 'hash1', now())");
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO admin_users (username, email, password_hash, created_at) "
+                        + "VALUES ('admin2', 'admin@test.com', 'hash2', now())"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        // 12. V3: admin_users: UNIQUE username se aplica
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO admin_users (username, email, password_hash, created_at) "
+                        + "VALUES ('admin1', 'other@test.com', 'hash3', now())"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        // 13. V3: admin_refresh_tokens: UNIQUE token_hash se aplica
+        jdbcTemplate.update(
+                "INSERT INTO admin_refresh_tokens (admin_user_id, token_hash, expires_at) "
+                        + "VALUES (1, 'admin-hash-unico', now() + interval '1 day')");
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO admin_refresh_tokens (admin_user_id, token_hash, expires_at) "
+                        + "VALUES (1, 'admin-hash-unico', now() + interval '1 day')"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        // 14. V3: admin_refresh_tokens: FK admin_user inexistente -> violacion de FK
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO admin_refresh_tokens (admin_user_id, token_hash, expires_at) "
+                        + "VALUES (999999, 'hash-sin-admin', now() + interval '1 day')"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        // 15. V3: admin_users: enabled default es true
+        Integer enabledCount = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM admin_users WHERE enabled = true", Integer.class);
+        assertThat(enabledCount).isEqualTo(1);
     }
 }
