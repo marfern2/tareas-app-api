@@ -23,6 +23,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfigurationSource;
 
 @Configuration
 @EnableWebSecurity
@@ -45,13 +46,15 @@ public class SecurityConfig {
     public SecurityFilterChain adminFilterChain(
             HttpSecurity http,
             AdminJwtService adminJwtService,
-            AdminUserRepository adminUserRepository
+            AdminUserRepository adminUserRepository,
+            CorsConfigurationSource corsConfigurationSource
     ) throws Exception {
 
         AdminJwtAuthenticationFilter adminFilter = new AdminJwtAuthenticationFilter(adminJwtService, adminUserRepository);
 
         http
                 .securityMatcher("/api/admin/**")
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
