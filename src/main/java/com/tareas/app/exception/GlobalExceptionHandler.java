@@ -1,11 +1,13 @@
 package com.tareas.app.exception;
 
+import com.tareas.app.admin.exception.AdminRefreshTokenNoValidoException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -116,6 +118,22 @@ public class GlobalExceptionHandler {
         log.warn("Refresh token inválido, expirado o revocado");
         Map<String, Object> r = base(HttpStatus.UNAUTHORIZED);
         r.put("message", "Token de refresco inválido o expirado");
+        return new ResponseEntity<>(r, HttpStatus.UNAUTHORIZED);
+    }
+
+    @ExceptionHandler(AdminRefreshTokenNoValidoException.class)
+    public ResponseEntity<Map<String, Object>> handleAdminRefreshTokenInvalido(AdminRefreshTokenNoValidoException ex) {
+        log.warn("Admin refresh token inválido, expirado o revocado");
+        Map<String, Object> r = base(HttpStatus.UNAUTHORIZED);
+        r.put("message", "Token de refresco inválido o expirado");
+        return new ResponseEntity<>(r, HttpStatus.UNAUTHORIZED);
+    }
+
+    @ExceptionHandler(DisabledException.class)
+    public ResponseEntity<Map<String, Object>> handleDisabled(DisabledException ex) {
+        log.warn("Cuenta deshabilitada");
+        Map<String, Object> r = base(HttpStatus.UNAUTHORIZED);
+        r.put("message", "Credenciales inválidas");
         return new ResponseEntity<>(r, HttpStatus.UNAUTHORIZED);
     }
 

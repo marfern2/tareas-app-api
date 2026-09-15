@@ -9,13 +9,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
 @Slf4j
-@Component
 @RequiredArgsConstructor
 public class RateLimitFilter extends OncePerRequestFilter {
 
@@ -50,7 +48,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String clientKey = obtenerIp(request);
         boolean permitido;
 
-        if (path.equals("/auth/login")) {
+        if (path.equals("/auth/login") || path.equals("/api/admin/auth/login")) {
             permitido = rateLimitService.tryConsumeLogin(clientKey);
         } else if (path.equals("/auth/registro")) {
             permitido = rateLimitService.tryConsumeRegistro(clientKey);
