@@ -1,10 +1,12 @@
 package com.tareas.app.admin.service;
 
 import com.tareas.app.admin.dto.AdminPageDTO;
+import com.tareas.app.admin.dto.AdminTaskTypeSummaryDTO;
 import com.tareas.app.admin.dto.AdminUserDetailDTO;
 import com.tareas.app.admin.dto.AdminUserSummaryDTO;
 import com.tareas.app.admin.dto.AdminUserTaskSummaryDTO;
 import com.tareas.app.admin.repository.AdminTareaRepository;
+import com.tareas.app.admin.repository.AdminTipoTareaRepository;
 import com.tareas.app.admin.repository.AdminUsuarioRepository;
 import com.tareas.app.exception.ResourceNotFoundException;
 import com.tareas.app.model.Tarea;
@@ -24,6 +26,9 @@ public class AdminUserService {
 
     private final AdminUsuarioRepository adminUsuarioRepository;
     private final AdminTareaRepository adminTareaRepository;
+    private final AdminTipoTareaRepository adminTipoTareaRepository;
+
+    private static final Set<String> ALLOWED_SORT_FIELDS_TASK_TYPES = Set.of("id", "nombre", "color");
 
     private static final Set<String> ALLOWED_SORT_FIELDS = Set.of("id", "username", "email");
     private static final int MAX_PAGE_SIZE = 100;
@@ -97,6 +102,31 @@ public class AdminUserService {
         return new AdminPageDTO<>(dtoPage);
     }
 
+    @Transactional(readOnly = true)
+    public AdminPageDTO<AdminTaskTypeSummaryDTO> listarTiposUsuario(Long usuarioId, int page, int size, String sort) {
+        if (!adminUsuarioRepository.existsById(usuarioId)) {
+            throw new ResourceNotFoundException("Usuario no encontrado");
+        }
+
+        Pageable pageable = buildPageableTaskTypes(page, size, sort);
+
+        Page<AdminTipoTareaRepository.TaskTypeAggregation> aggregationPage =
+                adminTipoTareaRepository.findByUsuarioIdWithTaskCounts(usuarioId, pageable);
+
+        Page<AdminTaskTypeSummaryDTO> dtoPage = aggregationPage.map(agg ->
+                new AdminTaskTypeSummaryDTO(
+                        agg.getId(),
+                        agg.getNombre(),
+                        agg.getDescripcion(),
+                        agg.getColor(),
+                        agg.getUsuarioId(),
+                        agg.getUsuarioUsername(),
+                        agg.getTaskCount()
+                ));
+
+        return new AdminPageDTO<>(dtoPage);
+    }
+
     private Pageable buildPageable(int page, int size, String sort) {
         int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
         int safePage = Math.max(page, 0);
@@ -115,5 +145,25 @@ public class AdminUserService {
         }
 
         return PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.ASC, "id"));
+    }
+
+    private Pageable buildPageableTaskTypes(int page, int size, String sort) {
+        int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
+        int safePage = Math.max(page, 0);
+
+        if (sort != null && !sort.isBlank()) {
+            String[] parts = sort.split(",");
+            String field = parts[0].trim();
+            if (!ALLOWED_SORT_FIELDS_TASK_TYPES.contains(field)) {
+                field = "nombre";
+            }
+            Sort.Direction direction = parts.length > 1
+                    && parts[1].trim().equalsIgnoreCase("desc")
+                    ? Sort.Direction.DESC
+                    : Sort.Direction.ASC;
+            return PageRequest.of(safePage, safeSize, Sort.by(direction, field));
+        }
+
+        return PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.ASC, "nombre"));
     }
 }
