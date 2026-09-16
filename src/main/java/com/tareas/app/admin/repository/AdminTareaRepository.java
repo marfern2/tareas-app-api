@@ -51,4 +51,10 @@ public interface AdminTareaRepository extends JpaRepository<Tarea, Long> {
 
     @Query("SELECT t FROM Tarea t JOIN FETCH t.usuario JOIN FETCH t.tipoTarea WHERE t.id = :id")
     java.util.Optional<Tarea> findByIdGlobal(@Param("id") Long id);
+
+    @Query("SELECT t FROM Tarea t JOIN FETCH t.usuario u JOIN FETCH t.tipoTarea tt WHERE t.id = :id AND u.id = :usuarioId")
+    java.util.Optional<Tarea> findByIdAndUsuarioId(@Param("id") Long id, @Param("usuarioId") Long usuarioId);
+
+    @Query("SELECT COUNT(t) FROM Tarea t WHERE t.usuario.id = :usuarioId AND t.tipoTarea.id = :tipoTareaId")
+    long countByUsuarioIdAndTipoTareaId(@Param("usuarioId") Long usuarioId, @Param("tipoTareaId") Long tipoTareaId);
 }
