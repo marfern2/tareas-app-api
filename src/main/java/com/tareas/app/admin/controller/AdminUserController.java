@@ -1,11 +1,14 @@
 package com.tareas.app.admin.controller;
 
 import com.tareas.app.admin.dto.AdminCreateTaskRequest;
+import com.tareas.app.admin.dto.AdminCreateTaskTypeRequest;
 import com.tareas.app.admin.dto.AdminPageDTO;
 import com.tareas.app.admin.dto.AdminSetUserEnabledRequest;
 import com.tareas.app.admin.dto.AdminTaskDetailDTO;
+import com.tareas.app.admin.dto.AdminTaskTypeDetailDTO;
 import com.tareas.app.admin.dto.AdminTaskTypeSummaryDTO;
 import com.tareas.app.admin.dto.AdminUpdateTaskRequest;
+import com.tareas.app.admin.dto.AdminUpdateTaskTypeRequest;
 import com.tareas.app.admin.dto.AdminUpdateUserRequest;
 import com.tareas.app.admin.dto.AdminUserDetailDTO;
 import com.tareas.app.admin.dto.AdminUserSummaryDTO;
@@ -122,6 +125,40 @@ public class AdminUserController {
 
         log.info("Admin request: eliminar tarea ID={} del usuario ID={}", taskId, id);
         adminTaskService.eliminarTarea(id, taskId);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ========================================================================
+    // CRUD de tipos de tarea del usuario
+    // ========================================================================
+
+    @PostMapping("/{id}/task-types")
+    public ResponseEntity<AdminTaskTypeDetailDTO> crearTipo(
+            @PathVariable Long id,
+            @Valid @RequestBody AdminCreateTaskTypeRequest request) {
+
+        log.info("Admin request: crear tipo de tarea para usuario ID={}", id);
+        AdminTaskTypeDetailDTO tipo = adminUserService.crearTipo(id, request);
+        return new ResponseEntity<>(tipo, HttpStatus.CREATED);
+    }
+
+    @PatchMapping("/{id}/task-types/{taskTypeId}")
+    public ResponseEntity<AdminTaskTypeDetailDTO> actualizarTipo(
+            @PathVariable Long id,
+            @PathVariable Long taskTypeId,
+            @Valid @RequestBody AdminUpdateTaskTypeRequest request) {
+
+        log.info("Admin request: actualizar tipo de tarea ID={} del usuario ID={}", taskTypeId, id);
+        return ResponseEntity.ok(adminUserService.actualizarTipo(id, taskTypeId, request));
+    }
+
+    @DeleteMapping("/{id}/task-types/{taskTypeId}")
+    public ResponseEntity<Void> eliminarTipo(
+            @PathVariable Long id,
+            @PathVariable Long taskTypeId) {
+
+        log.info("Admin request: eliminar tipo de tarea ID={} del usuario ID={}", taskTypeId, id);
+        adminUserService.eliminarTipo(id, taskTypeId);
         return ResponseEntity.noContent().build();
     }
 }

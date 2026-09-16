@@ -28,7 +28,9 @@ import java.time.LocalDateTime;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -349,5 +351,496 @@ class AdminTaskTypesIntegrationTest {
                         .header("Authorization", "Bearer " + androidToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
+    }
+
+    // ========================================================================
+    // CREAR TIPO
+    // ========================================================================
+
+    // Test 1
+    @Test
+    @DisplayName("POST /api/admin/users/{id}/task-types crea tipo válido -> 201")
+    void crearTipoValidoDevuelve201() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "create-type-" + SUF.get());
+
+        mockMvc.perform(post("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"Trabajo\",\"color\":\"#FF5733\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").isNumber())
+                .andExpect(jsonPath("$.nombre").value("Trabajo"))
+                .andExpect(jsonPath("$.color").value("#FF5733"))
+                .andExpect(jsonPath("$.usuarioId").value(usuario.getId()))
+                .andExpect(jsonPath("$.taskCount").value(0));
+    }
+
+    // Test 2
+    @Test
+    @DisplayName("POST crear tipo con descripción y color -> 201")
+    void crearTipoConDescripcionDevuelve201() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "create-type-desc-" + SUF.get());
+
+        mockMvc.perform(post("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"Personal\",\"descripcion\":\"Tareas personales\",\"color\":\"#33FF57\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nombre").value("Personal"))
+                .andExpect(jsonPath("$.descripcion").value("Tareas personales"))
+                .andExpect(jsonPath("$.color").value("#33FF57"));
+    }
+
+    // Test 3
+    @Test
+    @DisplayName("POST crear tipo para usuario inexistente -> 404")
+    void crearTipoUsuarioInexistenteDevuelve404() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        mockMvc.perform(post("/api/admin/users/{id}/task-types", 999999L)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"Trabajo\",\"color\":\"#FF5733\"}"))
+                .andExpect(status().isNotFound());
+    }
+
+    // Test 4
+    @Test
+    @DisplayName("POST crear tipo con nombre inválido -> 400")
+    void crearTipoNombreInvalidoDevuelve400() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "create-type-inv-" + SUF.get());
+
+        mockMvc.perform(post("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"A\",\"color\":\"#FF5733\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // Test 5
+    @Test
+    @DisplayName("POST crear tipo sin JWT -> 401")
+    void crearTipoSinJwtDevuelve401() throws Exception {
+        Usuario usuario = crearUsuario(userEmail(), "create-type-noauth-" + SUF.get());
+
+        mockMvc.perform(post("/api/admin/users/{id}/task-types", usuario.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"Trabajo\",\"color\":\"#FF5733\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // Test 6
+    @Test
+    @DisplayName("POST crear tipo con JWT Android rechazado -> 401")
+    void crearTipoJwtAndroidDevuelve401() throws Exception {
+        String androidEmail = userEmail();
+        String androidToken = loginUsuario(androidEmail);
+        Usuario usuario = crearUsuario(userEmail(), "create-type-android-" + SUF.get());
+
+        mockMvc.perform(post("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + androidToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"Trabajo\",\"color\":\"#FF5733\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ========================================================================
+    // EDITAR TIPO
+    // ========================================================================
+
+    // Test 7
+    @Test
+    @DisplayName("PATCH editar nombre -> 200")
+    void editarNombreDevuelve200() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "update-name-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "Original-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(patch("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"Renombrado\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nombre").value("Renombrado"))
+                .andExpect(jsonPath("$.id").value(tipo.getId()));
+    }
+
+    // Test 8
+    @Test
+    @DisplayName("PATCH editar descripción -> 200")
+    void editarDescripcionDevuelve200() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "update-desc-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "Tipo-desc-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(patch("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"descripcion\":\"Nueva descripción\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.descripcion").value("Nueva descripción"));
+    }
+
+    // Test 9
+    @Test
+    @DisplayName("PATCH editar color -> 200")
+    void editarColorDevuelve200() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "update-color-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "Tipo-color-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(patch("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"color\":\"#00FF00\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.color").value("#00FF00"));
+    }
+
+    // Test 10
+    @Test
+    @DisplayName("PATCH body vacío -> 400")
+    void editarTipoBodyVacioDevuelve400() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "update-empty-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "Tipo-empty-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(patch("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // Test 11
+    @Test
+    @DisplayName("PATCH tipo inexistente -> 404")
+    void editarTipoInexistenteDevuelve404() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "update-notfound-" + SUF.get());
+
+        mockMvc.perform(patch("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), 999999L)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"Nuevo\"}"))
+                .andExpect(status().isNotFound());
+    }
+
+    // Test 12
+    @Test
+    @DisplayName("PATCH tipo de otro usuario -> 404")
+    void editarTipoDeOtroUsuarioDevuelve404() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario1 = crearUsuario(userEmail(), "update-owner-" + SUF.get());
+        Usuario usuario2 = crearUsuario(userEmail(), "update-other-" + SUF.get());
+        TipoTarea tipoUsuario1 = crearTipoTarea(usuario1, "Tipo-u1-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(patch("/api/admin/users/{id}/task-types/{taskTypeId}", usuario2.getId(), tipoUsuario1.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"Robado\"}"))
+                .andExpect(status().isNotFound());
+    }
+
+    // Test 13
+    @Test
+    @DisplayName("PATCH usuario inexistente -> 404")
+    void editarTipoUsuarioInexistenteDevuelve404() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        mockMvc.perform(patch("/api/admin/users/{id}/task-types/{taskTypeId}", 999999L, 999999L)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"Nuevo\"}"))
+                .andExpect(status().isNotFound());
+    }
+
+    // Test 14
+    @Test
+    @DisplayName("PATCH valores inválidos -> 400")
+    void editarTipoValoresInvalidosDevuelve400() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "update-inv-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "Tipo-inv-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(patch("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"A\",\"color\":\"invalido\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ========================================================================
+    // ELIMINAR TIPO
+    // ========================================================================
+
+    // Test 15
+    @Test
+    @DisplayName("DELETE tipo sin tareas -> 204")
+    void eliminarTipoSinTareasDevuelve204() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "delete-type-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "Borrable-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(delete("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNoContent());
+
+        assertThat(tipoTareaRepository.findById(tipo.getId())).isEmpty();
+    }
+
+    // Test 16
+    @Test
+    @DisplayName("DELETE tipo deja de existir después de eliminar")
+    void eliminarTipoDejaDeExistir() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "delete-gone-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "Fantasma-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(delete("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNoContent());
+
+        assertThat(tipoTareaRepository.existsById(tipo.getId())).isFalse();
+    }
+
+    // Test 17
+    @Test
+    @DisplayName("DELETE tipo con tareas -> 409")
+    void eliminarTipoConTareasDevuelve409() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "delete-withtasks-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "ConTareas-" + SUF.incrementAndGet(), "#FF5733");
+        crearTarea(usuario, tipo, "Tarea asociada");
+
+        mockMvc.perform(delete("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isConflict());
+    }
+
+    // Test 18
+    @Test
+    @DisplayName("DELETE tipo con tareas no borra las tareas")
+    void eliminarTipoConTareasNoBorraTareas() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "delete-nodrop-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "NoDrop-" + SUF.incrementAndGet(), "#FF5733");
+        Tarea tarea = crearTarea(usuario, tipo, "Tarea preservada");
+
+        mockMvc.perform(delete("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isConflict());
+
+        assertThat(tareaRepository.findById(tarea.getId())).isPresent();
+        assertThat(tipoTareaRepository.findById(tipo.getId())).isPresent();
+    }
+
+    // Test 19
+    @Test
+    @DisplayName("DELETE tipo de otro usuario -> 404")
+    void eliminarTipoDeOtroUsuarioDevuelve404() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario1 = crearUsuario(userEmail(), "delete-owner-" + SUF.get());
+        Usuario usuario2 = crearUsuario(userEmail(), "delete-other-" + SUF.get());
+        TipoTarea tipoUsuario1 = crearTipoTarea(usuario1, "Propietario-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(delete("/api/admin/users/{id}/task-types/{taskTypeId}", usuario2.getId(), tipoUsuario1.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNotFound());
+    }
+
+    // Test 20
+    @Test
+    @DisplayName("DELETE usuario inexistente -> 404")
+    void eliminarTipoUsuarioInexistenteDevuelve404() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        mockMvc.perform(delete("/api/admin/users/{id}/task-types/{taskTypeId}", 999999L, 999999L)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNotFound());
+    }
+
+    // Test 21
+    @Test
+    @DisplayName("DELETE tipo inexistente -> 404")
+    void eliminarTipoInexistenteDevuelve404() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "delete-noexist-" + SUF.get());
+
+        mockMvc.perform(delete("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), 999999L)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNotFound());
+    }
+
+    // Test 22
+    @Test
+    @DisplayName("DELETE tipo sin JWT -> 401")
+    void eliminarTipoSinJwtDevuelve401() throws Exception {
+        Usuario usuario = crearUsuario(userEmail(), "delete-noauth-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "NoAuth-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(delete("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // Test 23
+    @Test
+    @DisplayName("DELETE tipo con JWT Android rechazado -> 401")
+    void eliminarTipoJwtAndroidDevuelve401() throws Exception {
+        String androidEmail = userEmail();
+        String androidToken = loginUsuario(androidEmail);
+        Usuario usuario = crearUsuario(userEmail(), "delete-android-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "AndroidJWT-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(delete("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + androidToken))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // Test 24
+    @Test
+    @DisplayName("DELETE tipo con JWT admin permitido -> 204")
+    void eliminarTipoJwtAdminPermitido() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "delete-adminok-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "AdminOK-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(delete("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNoContent());
+    }
+
+    // ========================================================================
+    // VERIFICACIÓN DTO COMPLETO - POST
+    // ========================================================================
+
+    // Test 25
+    @Test
+    @DisplayName("POST devuelve usuarioId, usuarioUsername, usuarioEmail, taskCount=0")
+    void crearTipoDevuelveDtoCompleto() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uniqueUsername = "dto-verify-" + SUF.get();
+        Usuario usuario = crearUsuario(userEmail(), uniqueUsername);
+
+        mockMvc.perform(post("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"Verificado\",\"color\":\"#AABBCC\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.usuarioId").value(usuario.getId()))
+                .andExpect(jsonPath("$.usuarioUsername").value(uniqueUsername))
+                .andExpect(jsonPath("$.usuarioEmail").value(usuario.getEmail()))
+                .andExpect(jsonPath("$.taskCount").value(0));
+    }
+
+    // ========================================================================
+    // VERIFICACIÓN DTO COMPLETO - PATCH
+    // ========================================================================
+
+    // Test 26
+    @Test
+    @DisplayName("PATCH devuelve usuarioId, usuarioUsername, usuarioEmail y taskCount correcto")
+    void actualizarTipoDevuelveDtoCompleto() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uniqueUsername = "patch-verify-" + SUF.get();
+        Usuario usuario = crearUsuario(userEmail(), uniqueUsername);
+        TipoTarea tipo = crearTipoTarea(usuario, "PatchVerify-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(patch("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"PatchVerificado\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.usuarioId").value(usuario.getId()))
+                .andExpect(jsonPath("$.usuarioUsername").value(uniqueUsername))
+                .andExpect(jsonPath("$.usuarioEmail").value(usuario.getEmail()))
+                .andExpect(jsonPath("$.taskCount").value(0));
+    }
+
+    // Test 27
+    @Test
+    @DisplayName("PATCH mantiene taskCount correcto cuando el tipo ya tiene tareas")
+    void actualizarTipoMantieneTaskCount() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "patch-count-" + SUF.get());
+        TipoTarea tipo = crearTipoTarea(usuario, "CountVerify-" + SUF.incrementAndGet(), "#FF5733");
+        crearTarea(usuario, tipo, "Tarea 1");
+        crearTarea(usuario, tipo, "Tarea 2");
+
+        mockMvc.perform(patch("/api/admin/users/{id}/task-types/{taskTypeId}", usuario.getId(), tipo.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"descripcion\":\"Updated\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.taskCount").value(2));
     }
 }
