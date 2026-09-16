@@ -66,6 +66,12 @@ public interface AdminTipoTareaRepository extends JpaRepository<TipoTarea, Long>
     @Query("SELECT t FROM TipoTarea t WHERE t.id = :id AND t.usuario.id = :usuarioId")
     java.util.Optional<TipoTarea> findByIdAndUsuarioId(@Param("id") Long id, @Param("usuarioId") Long usuarioId);
 
+    @Query("SELECT CASE WHEN COUNT(t) > 0 THEN true ELSE false END FROM TipoTarea t WHERE LOWER(t.nombre) = LOWER(:nombre) AND t.usuario.id = :usuarioId")
+    boolean existsByNombreIgnoreCaseAndUsuarioId(@Param("nombre") String nombre, @Param("usuarioId") Long usuarioId);
+
+    @Query("SELECT CASE WHEN COUNT(t) > 0 THEN true ELSE false END FROM TipoTarea t WHERE LOWER(t.nombre) = LOWER(:nombre) AND t.usuario.id = :usuarioId AND t.id <> :id")
+    boolean existsByNombreIgnoreCaseAndUsuarioIdExcludingId(@Param("nombre") String nombre, @Param("usuarioId") Long usuarioId, @Param("id") Long id);
+
     interface TaskTypeAggregation {
         Long getId();
         String getNombre();

@@ -1,8 +1,11 @@
 package com.tareas.app.admin.service;
 
+import com.tareas.app.admin.dto.AdminCreateTaskTypeRequest;
 import com.tareas.app.admin.dto.AdminPageDTO;
 import com.tareas.app.admin.dto.AdminSetUserEnabledRequest;
+import com.tareas.app.admin.dto.AdminTaskTypeDetailDTO;
 import com.tareas.app.admin.dto.AdminTaskTypeSummaryDTO;
+import com.tareas.app.admin.dto.AdminUpdateTaskTypeRequest;
 import com.tareas.app.admin.dto.AdminUpdateUserRequest;
 import com.tareas.app.admin.dto.AdminUserDetailDTO;
 import com.tareas.app.admin.dto.AdminUserSummaryDTO;
@@ -249,6 +252,112 @@ public class AdminUserService {
 
         adminUsuarioRepository.delete(usuario);
         log.info("Usuario {} eliminado junto con {} tareas y {} tipos de tarea", id, tareas.size(), tipos.size());
+    }
+
+    @Transactional
+    public AdminTaskTypeDetailDTO crearTipo(Long usuarioId, AdminCreateTaskTypeRequest request) {
+        Usuario usuario = adminUsuarioRepository.findById(usuarioId)
+                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+
+        if (adminTipoTareaRepository.existsByNombreIgnoreCaseAndUsuarioId(request.getNombre(), usuarioId)) {
+            throw new ResourceConflictException("Ya existe un tipo de tarea con ese nombre para este usuario");
+        }
+
+        TipoTarea tipoTarea = TipoTarea.builder()
+                .nombre(request.getNombre().trim())
+                .descripcion(request.getDescripcion() != null ? request.getDescripcion().trim() : null)
+                .color(request.getColor().trim())
+                .usuario(usuario)
+                .build();
+
+        TipoTarea guardado = adminTipoTareaRepository.save(tipoTarea);
+        log.info("Admin creó tipo de tarea ID={} para usuario ID={}", guardado.getId(), usuarioId);
+
+        return new AdminTaskTypeDetailDTO(
+                guardado.getId(),
+                guardado.getNombre(),
+                guardado.getDescripcion(),
+                guardado.getColor(),
+                usuario.getId(),
+                usuario.getUsername(),
+                usuario.getEmail(),
+                0
+        );
+    }
+
+    @Transactional
+    public AdminTaskTypeDetailDTO actualizarTipo(Long usuarioId, Long tipoTareaId, AdminUpdateTaskTypeRequest request) {
+        Usuario usuario = adminUsuarioRepository.findById(usuarioId)
+                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+
+        TipoTarea tipoTarea = adminTipoTareaRepository.findByIdAndUsuarioId(tipoTareaId, usuarioId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tipo de tarea no encontrado"));
+
+        boolean hasAnyField = request.getNombre() != null
+                || request.getDescripcion() != null
+                || request.getColor() != null;
+
+        if (!hasAnyField) {
+            throw new ValidacionException("body", "El body no puede estar vacío");
+        }
+
+        if (request.getNombre() != null) {
+            if (request.getNombre().isBlank()) {
+                throw new ValidacionException("nombre", "El nombre no puede estar vacío");
+            }
+            if (!request.getNombre().trim().equalsIgnoreCase(tipoTarea.getNombre())
+                    && adminTipoTareaRepository.existsByNombreIgnoreCaseAndUsuarioIdExcludingId(
+                            request.getNombre().trim(), usuarioId, tipoTareaId)) {
+                throw new ResourceConflictException("Ya existe un tipo de tarea con ese nombre para este usuario");
+            }
+            tipoTarea.setNombre(request.getNombre().trim());
+        }
+
+        if (request.getDescripcion() != null) {
+            tipoTarea.setDescripcion(request.getDescripcion().trim());
+        }
+
+        if (request.getColor() != null) {
+            if (request.getColor().isBlank()) {
+                throw new ValidacionException("color", "El color no puede estar vacío");
+            }
+            tipoTarea.setColor(request.getColor().trim());
+        }
+
+        adminTipoTareaRepository.save(tipoTarea);
+        log.info("Admin actualizó tipo de tarea ID={} del usuario ID={}", tipoTareaId, usuarioId);
+
+        long taskCount = adminTareaRepository.countByUsuarioIdAndTipoTareaId(usuarioId, tipoTareaId);
+
+        return new AdminTaskTypeDetailDTO(
+                tipoTarea.getId(),
+                tipoTarea.getNombre(),
+                tipoTarea.getDescripcion(),
+                tipoTarea.getColor(),
+                usuario.getId(),
+                usuario.getUsername(),
+                usuario.getEmail(),
+                taskCount
+        );
+    }
+
+    @Transactional
+    public void eliminarTipo(Long usuarioId, Long tipoTareaId) {
+        if (!adminUsuarioRepository.existsById(usuarioId)) {
+            throw new ResourceNotFoundException("Usuario no encontrado");
+        }
+
+        TipoTarea tipoTarea = adminTipoTareaRepository.findByIdAndUsuarioId(tipoTareaId, usuarioId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tipo de tarea no encontrado"));
+
+        long taskCount = adminTareaRepository.countByUsuarioIdAndTipoTareaId(usuarioId, tipoTareaId);
+        if (taskCount > 0) {
+            throw new ResourceConflictException(
+                    "No se puede eliminar este tipo de tarea porque tiene tareas asociadas");
+        }
+
+        adminTipoTareaRepository.delete(tipoTarea);
+        log.info("Admin eliminó tipo de tarea ID={} del usuario ID={}", tipoTareaId, usuarioId);
     }
 
     private void revocarRefreshTokensPorUsuario(Long usuarioId) {
