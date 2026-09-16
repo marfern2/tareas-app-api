@@ -219,7 +219,137 @@ class CorsIntegrationTest {
     }
 
     // ========================================================================
-    // 9. JWT admin no puede acceder a endpoints normales
+    // 9. Preflight PATCH /api/admin/users/1 -> permitido
+    // ========================================================================
+    @Test
+    @DisplayName("Preflight PATCH /api/admin/users/1 desde origen permitido devuelve CORS correcto")
+    void preflightPatchAdminUsers() throws Exception {
+        mockMvc.perform(options("/api/admin/users/1")
+                        .header("Origin", ORIGIN_ADMIN)
+                        .header("Access-Control-Request-Method", "PATCH")
+                        .header("Access-Control-Request-Headers", "authorization,content-type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", ORIGIN_ADMIN))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("PATCH")))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("DELETE")))
+                .andExpect(header().exists("Access-Control-Allow-Headers"))
+                .andExpect(header().string("Access-Control-Max-Age", "3600"));
+    }
+
+    // ========================================================================
+    // 10. Preflight DELETE /api/admin/users/1 -> permitido
+    // ========================================================================
+    @Test
+    @DisplayName("Preflight DELETE /api/admin/users/1 desde origen permitido devuelve CORS correcto")
+    void preflightDeleteAdminUsers() throws Exception {
+        mockMvc.perform(options("/api/admin/users/1")
+                        .header("Origin", ORIGIN_ADMIN)
+                        .header("Access-Control-Request-Method", "DELETE")
+                        .header("Access-Control-Request-Headers", "authorization,content-type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", ORIGIN_ADMIN))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("PATCH")))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("DELETE")));
+    }
+
+    // ========================================================================
+    // 11. Preflight PATCH /api/admin/users/1/tasks/1 -> permitido
+    // ========================================================================
+    @Test
+    @DisplayName("Preflight PATCH /api/admin/users/1/tasks/1 desde origen permitido devuelve CORS correcto")
+    void preflightPatchAdminUsersTasks() throws Exception {
+        mockMvc.perform(options("/api/admin/users/1/tasks/1")
+                        .header("Origin", ORIGIN_ADMIN)
+                        .header("Access-Control-Request-Method", "PATCH")
+                        .header("Access-Control-Request-Headers", "authorization,content-type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", ORIGIN_ADMIN))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("PATCH")))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("DELETE")));
+    }
+
+    // ========================================================================
+    // 12. Preflight DELETE /api/admin/users/1/tasks/1 -> permitido
+    // ========================================================================
+    @Test
+    @DisplayName("Preflight DELETE /api/admin/users/1/tasks/1 desde origen permitido devuelve CORS correcto")
+    void preflightDeleteAdminUsersTasks() throws Exception {
+        mockMvc.perform(options("/api/admin/users/1/tasks/1")
+                        .header("Origin", ORIGIN_ADMIN)
+                        .header("Access-Control-Request-Method", "DELETE")
+                        .header("Access-Control-Request-Headers", "authorization,content-type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", ORIGIN_ADMIN))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("PATCH")))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("DELETE")));
+    }
+
+    // ========================================================================
+    // 13. Preflight PATCH /api/admin/users/1/task-types/1 -> permitido
+    // ========================================================================
+    @Test
+    @DisplayName("Preflight PATCH /api/admin/users/1/task-types/1 desde origen permitido devuelve CORS correcto")
+    void preflightPatchAdminUsersTaskTypes() throws Exception {
+        mockMvc.perform(options("/api/admin/users/1/task-types/1")
+                        .header("Origin", ORIGIN_ADMIN)
+                        .header("Access-Control-Request-Method", "PATCH")
+                        .header("Access-Control-Request-Headers", "authorization,content-type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", ORIGIN_ADMIN))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("PATCH")))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("DELETE")));
+    }
+
+    // ========================================================================
+    // 14. Preflight DELETE /api/admin/users/1/task-types/1 -> permitido
+    // ========================================================================
+    @Test
+    @DisplayName("Preflight DELETE /api/admin/users/1/task-types/1 desde origen permitido devuelve CORS correcto")
+    void preflightDeleteAdminUsersTaskTypes() throws Exception {
+        mockMvc.perform(options("/api/admin/users/1/task-types/1")
+                        .header("Origin", ORIGIN_ADMIN)
+                        .header("Access-Control-Request-Method", "DELETE")
+                        .header("Access-Control-Request-Headers", "authorization,content-type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", ORIGIN_ADMIN))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("PATCH")))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("DELETE")));
+    }
+
+    // ========================================================================
+    // 15. Preflight PATCH desde origen NO permitido -> sin CORS
+    // ========================================================================
+    @Test
+    @DisplayName("Preflight PATCH admin desde origen evil no obtiene cabeceras CORS")
+    void preflightPatchOrigenNoPermitidoSinCors() throws Exception {
+        MvcResult result = mockMvc.perform(options("/api/admin/users/1")
+                        .header("Origin", ORIGIN_EVIL)
+                        .header("Access-Control-Request-Method", "PATCH")
+                        .header("Access-Control-Request-Headers", "authorization,content-type"))
+                .andReturn();
+
+        String allowOrigin = result.getResponse().getHeader("Access-Control-Allow-Origin");
+        assertThat(allowOrigin).isNull();
+    }
+
+    // ========================================================================
+    // 16. Preflight DELETE desde origen NO permitido -> sin CORS
+    // ========================================================================
+    @Test
+    @DisplayName("Preflight DELETE admin desde origen evil no obtiene cabeceras CORS")
+    void preflightDeleteOrigenNoPermitidoSinCors() throws Exception {
+        MvcResult result = mockMvc.perform(options("/api/admin/users/1")
+                        .header("Origin", ORIGIN_EVIL)
+                        .header("Access-Control-Request-Method", "DELETE")
+                        .header("Access-Control-Request-Headers", "authorization,content-type"))
+                .andReturn();
+
+        String allowOrigin = result.getResponse().getHeader("Access-Control-Allow-Origin");
+        assertThat(allowOrigin).isNull();
+    }
+
+    // ========================================================================
+    // 17. JWT admin no puede acceder a endpoints normales
     // ========================================================================
     @Test
     @DisplayName("JWT admin no puede acceder a /tareas")
