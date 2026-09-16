@@ -656,4 +656,338 @@ class AdminUsersIntegrationTest {
         assertThat(body.get("completedTasks").asLong()).isEqualTo(1);
         assertThat(body.get("pendingTasks").asLong()).isEqualTo(1);
     }
+
+    // ========================================================================
+    // 21. /users/{id}/task-types sin token -> 401
+    // ========================================================================
+    @Test
+    @DisplayName("GET /api/admin/users/{id}/task-types sin token devuelve 401")
+    void listarTiposUsuarioSinTokenDevuelve401() throws Exception {
+        mockMvc.perform(get("/api/admin/users/{id}/task-types", 1L))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ========================================================================
+    // 22. JWT Android -> /users/{id}/task-types -> 401
+    // ========================================================================
+    @Test
+    @DisplayName("JWT Android no puede acceder a GET /api/admin/users/{id}/task-types")
+    void jwtAndroidNoAccedeListarTiposUsuario() throws Exception {
+        String androidEmail = userEmail();
+        String androidToken = loginUsuario(androidEmail);
+
+        mockMvc.perform(get("/api/admin/users/{id}/task-types", 1L)
+                        .header("Authorization", "Bearer " + androidToken))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ========================================================================
+    // 23. JWT admin -> /users/{id}/task-types -> 200
+    // ========================================================================
+    @Test
+    @DisplayName("JWT admin puede listar tipos de tarea de un usuario -> 200")
+    void jwtAdminPuedeListarTiposUsuario() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "type-user-" + SUF.get());
+        crearTipoTareaPara(usuario, "Tipo-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20));
+    }
+
+    // ========================================================================
+    // 24. Solo devuelve tipos del usuario indicado, no de otros
+    // ========================================================================
+    @Test
+    @DisplayName("/users/{id}/task-types devuelve solo los tipos del usuario indicado")
+    void tiposUsuarioDevuelveSoloTiposDeEseUsuario() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario1 = crearUsuario(userEmail(), "type-owner-" + SUF.get());
+        Usuario usuario2 = crearUsuario(userEmail(), "type-other-" + SUF.get());
+        crearTipoTareaPara(usuario1, "TipoA-" + SUF.incrementAndGet(), "#FF5733");
+        crearTipoTareaPara(usuario1, "TipoB-" + SUF.incrementAndGet(), "#33FF57");
+        crearTipoTareaPara(usuario2, "TipoC-" + SUF.incrementAndGet(), "#AABBCC");
+
+        MvcResult result = mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario1.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andReturn();
+
+        JsonNode content = objectMapper.readTree(result.getResponse().getContentAsString()).get("content");
+        assertThat(content.size()).isEqualTo(2);
+        for (JsonNode tipo : content) {
+            assertThat(tipo.get("usuarioId").asLong()).isEqualTo(usuario1.getId());
+        }
+    }
+
+    // ========================================================================
+    // 25. Paginación correcta
+    // ========================================================================
+    @Test
+    @DisplayName("/users/{id}/task-types soporta paginación correcta")
+    void tiposUsuarioPaginado() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "pag-types-" + SUF.get());
+        for (int i = 0; i < 5; i++) {
+            crearTipoTareaPara(usuario, "Tipo-" + SUF.incrementAndGet(), "#FF5733");
+        }
+
+        mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("page", "0")
+                        .param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.totalElements").value(5))
+                .andExpect(jsonPath("$.totalPages").value(3))
+                .andExpect(jsonPath("$.first").value(true))
+                .andExpect(jsonPath("$.last").value(false));
+    }
+
+    // ========================================================================
+    // 26. Sort por nombre asc/desc
+    // ========================================================================
+    @Test
+    @DisplayName("Sort por nombre asc y desc funciona correctamente en tipos de usuario")
+    void tiposUsuarioSortNombreAscDesc() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "sort-types-" + SUF.get());
+        crearTipoTareaPara(usuario, "zzz-ultimo-" + SUF.get(), "#FF5733");
+        crearTipoTareaPara(usuario, "aaa-primero-" + SUF.get(), "#33FF57");
+
+        MvcResult resultAsc = mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("sort", "nombre,asc"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode contentAsc = objectMapper.readTree(resultAsc.getResponse().getContentAsString()).get("content");
+        assertThat(contentAsc.get(0).get("nombre").asText()).startsWith("aaa-primero-");
+
+        MvcResult resultDesc = mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("sort", "nombre,desc"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode contentDesc = objectMapper.readTree(resultDesc.getResponse().getContentAsString()).get("content");
+        assertThat(contentDesc.get(0).get("nombre").asText()).startsWith("zzz-ultimo-");
+    }
+
+    // ========================================================================
+    // 27. Sort por id
+    // ========================================================================
+    @Test
+    @DisplayName("Sort por id funciona correctamente en tipos de usuario")
+    void tiposUsuarioSortId() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "sortid-types-" + SUF.get());
+        crearTipoTareaPara(usuario, "TipoA-" + SUF.incrementAndGet(), "#FF5733");
+        crearTipoTareaPara(usuario, "TipoB-" + SUF.incrementAndGet(), "#33FF57");
+
+        mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("sort", "id,desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content.length()").value(2));
+    }
+
+    // ========================================================================
+    // 28. Sort por color
+    // ========================================================================
+    @Test
+    @DisplayName("Sort por color funciona correctamente en tipos de usuario")
+    void tiposUsuarioSortColor() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "sortcolor-types-" + SUF.get());
+        crearTipoTareaPara(usuario, "TipoA-" + SUF.incrementAndGet(), "#FF0000");
+        crearTipoTareaPara(usuario, "TipoB-" + SUF.incrementAndGet(), "#00FF00");
+
+        mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("sort", "color,asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content.length()").value(2));
+    }
+
+    // ========================================================================
+    // 29. Size máximo se aplica
+    // ========================================================================
+    @Test
+    @DisplayName("Size máximo de 100 se aplica correctamente")
+    void tiposUsuarioSizeMaximo() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "maxsize-types-" + SUF.get());
+
+        mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("size", "500"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.size").value(100));
+    }
+
+    // ========================================================================
+    // 30. Usuario inexistente -> 404
+    // ========================================================================
+    @Test
+    @DisplayName("/users/{id}/task-types con usuario inexistente devuelve 404")
+    void tiposUsuarioInexistenteDevuelve404() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        mockMvc.perform(get("/api/admin/users/{id}/task-types", 999999L)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNotFound());
+    }
+
+    // ========================================================================
+    // 31. taskCount correcto
+    // ========================================================================
+    @Test
+    @DisplayName("taskCount refleja correctamente el número de tareas por tipo de usuario")
+    void tiposUsuarioTaskCountCorrecto() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "count-types-" + SUF.get());
+        com.tareas.app.model.TipoTarea tipo = crearTipoTareaPara(usuario, "Tipo-count-" + SUF.incrementAndGet(), "#FF5733");
+        crearTareaPara(usuario, tipo, "Tarea 1");
+        crearTareaPara(usuario, tipo, "Tarea 2");
+        crearTareaPara(usuario, tipo, "Tarea 3");
+
+        MvcResult result = mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode content = objectMapper.readTree(result.getResponse().getContentAsString()).get("content");
+        assertThat(content.size()).isEqualTo(1);
+        assertThat(content.get(0).get("taskCount").asLong()).isEqualTo(3);
+    }
+
+    // ========================================================================
+    // 32. Tipo sin tareas -> taskCount 0
+    // ========================================================================
+    @Test
+    @DisplayName("Tipo sin tareas aparece con taskCount=0 en tipos de usuario")
+    void tiposUsuarioSinTareasApareceConCountCero() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "zero-types-" + SUF.get());
+        com.tareas.app.model.TipoTarea tipo = crearTipoTareaPara(usuario, "Tipo-zero-" + SUF.incrementAndGet(), "#FF5733");
+
+        MvcResult result = mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode content = objectMapper.readTree(result.getResponse().getContentAsString()).get("content");
+        assertThat(content.size()).isEqualTo(1);
+        assertThat(content.get(0).get("taskCount").asLong()).isZero();
+        assertThat(content.get(0).get("id").asLong()).isEqualTo(tipo.getId());
+    }
+
+    // ========================================================================
+    // 33. Sort inválido no causa 500
+    // ========================================================================
+    @Test
+    @DisplayName("Sort inválido usa fallback a nombre sin causar 500 en tipos de usuario")
+    void tiposUsuarioSortInvalidoNoCausa500() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "invalid-sort-types-" + SUF.get());
+        crearTipoTareaPara(usuario, "Tipo-" + SUF.incrementAndGet(), "#FF5733");
+
+        mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("sort", "password,asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray());
+
+        mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("sort", "nonexistent-field"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray());
+    }
+
+    // ========================================================================
+    // 34. Usuario sin tipos devuelve lista vacía
+    // ========================================================================
+    @Test
+    @DisplayName("Usuario sin tipos de tarea devuelve lista vacía")
+    void tiposUsuarioSinTiposDevuelveListaVacia() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        Usuario usuario = crearUsuario(userEmail(), "no-types-" + SUF.get());
+
+        mockMvc.perform(get("/api/admin/users/{id}/task-types", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content.length()").value(0))
+                .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    // ========================================================================
+    // Helper methods for task types
+    // ========================================================================
+    private com.tareas.app.model.TipoTarea crearTipoTareaPara(Usuario usuario, String nombre, String color) {
+        com.tareas.app.model.TipoTarea tipo = com.tareas.app.model.TipoTarea.builder()
+                .nombre(nombre)
+                .color(color)
+                .usuario(usuario)
+                .build();
+        return tipoTareaRepository.save(tipo);
+    }
+
+    private com.tareas.app.model.Tarea crearTareaPara(Usuario usuario, com.tareas.app.model.TipoTarea tipo, String titulo) {
+        com.tareas.app.model.Tarea tarea = com.tareas.app.model.Tarea.builder()
+                .titulo(titulo)
+                .fecha(java.time.LocalDate.now())
+                .completada(false)
+                .urgencia(0)
+                .usuario(usuario)
+                .tipoTarea(tipo)
+                .build();
+        return tareaRepository.save(tarea);
+    }
 }

@@ -43,6 +43,23 @@ public interface AdminTipoTareaRepository extends JpaRepository<TipoTarea, Long>
             """)
     Optional<TaskTypeAggregation> findByIdWithTaskCount(@Param("id") Long id);
 
+    @Query(value = """
+            SELECT t.id AS id, t.nombre AS nombre, t.descripcion AS descripcion,
+                   t.color AS color, u.id AS usuarioId, u.username AS usuarioUsername,
+                   u.email AS usuarioEmail,
+                   COUNT(task.id) AS taskCount
+            FROM TipoTarea t
+            LEFT JOIN Tarea task ON task.tipoTarea = t
+            LEFT JOIN t.usuario u
+            WHERE t.usuario.id = :usuarioId
+            GROUP BY t.id, t.nombre, t.descripcion, t.color, u.id, u.username, u.email
+            """,
+            countQuery = """
+            SELECT COUNT(t) FROM TipoTarea t
+            WHERE t.usuario.id = :usuarioId
+            """)
+    Page<TaskTypeAggregation> findByUsuarioIdWithTaskCounts(@Param("usuarioId") Long usuarioId, Pageable pageable);
+
     interface TaskTypeAggregation {
         Long getId();
         String getNombre();
