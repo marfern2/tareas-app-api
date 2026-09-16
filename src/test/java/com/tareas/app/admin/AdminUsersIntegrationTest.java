@@ -25,7 +25,9 @@ import java.time.LocalDateTime;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -965,6 +967,455 @@ class AdminUsersIntegrationTest {
                 .andExpect(jsonPath("$.content").isArray())
                 .andExpect(jsonPath("$.content.length()").value(0))
                 .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    // ========================================================================
+    // PATCH /api/admin/users/{id} - EDITAR USUARIO
+    // ========================================================================
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id} admin cambia username")
+    void adminCambiaUsername() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "edit-user-" + SUF.get());
+
+        mockMvc.perform(patch("/api/admin/users/{id}", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"nuevo-username\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(usuario.getId()))
+                .andExpect(jsonPath("$.username").value("nuevo-username"))
+                .andExpect(jsonPath("$.email").value(uEmail));
+
+        assertThat(usuarioRepository.findById(usuario.getId()).get().getUsername()).isEqualTo("nuevo-username");
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id} admin cambia email")
+    void adminCambiaEmail() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "edit-email-" + SUF.get());
+
+        String newEmail = "nuevo-" + SUF.incrementAndGet() + "@test.local";
+
+        mockMvc.perform(patch("/api/admin/users/{id}", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + newEmail + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value(newEmail));
+
+        assertThat(usuarioRepository.findById(usuario.getId()).get().getEmail()).isEqualTo(newEmail);
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id} actualización parcial solo username")
+    void actualizacionParcialSoloUsername() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "partial-u-" + SUF.get());
+
+        mockMvc.perform(patch("/api/admin/users/{id}", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"solo-username\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("solo-username"))
+                .andExpect(jsonPath("$.email").value(uEmail));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id} actualización parcial solo email")
+    void actualizacionParcialSoloEmail() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "partial-e-" + SUF.get());
+        String originalUsername = usuario.getUsername();
+
+        String newEmail = "solo-email-" + SUF.incrementAndGet() + "@test.local";
+
+        mockMvc.perform(patch("/api/admin/users/{id}", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + newEmail + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value(originalUsername))
+                .andExpect(jsonPath("$.email").value(newEmail));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id} username duplicado -> 409")
+    void usernameDuplicadoDevuelve409() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail1 = userEmail();
+        Usuario usuario1 = crearUsuario(uEmail1, "dup-user-" + SUF.get());
+        String uEmail2 = userEmail();
+        Usuario usuario2 = crearUsuario(uEmail2, "dup-target-" + SUF.get());
+
+        mockMvc.perform(patch("/api/admin/users/{id}", usuario1.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"" + usuario2.getUsername() + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("El username ya está en uso por otro usuario"));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id} email duplicado -> 409")
+    void emailDuplicadoDevuelve409() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail1 = userEmail();
+        Usuario usuario1 = crearUsuario(uEmail1, "dup-e1-" + SUF.get());
+        String uEmail2 = userEmail();
+        Usuario usuario2 = crearUsuario(uEmail2, "dup-e2-" + SUF.get());
+
+        mockMvc.perform(patch("/api/admin/users/{id}", usuario1.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + uEmail2 + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("El email ya está en uso por otro usuario"));
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id} email inválido -> 400")
+    void emailInvalidoDevuelve400() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "invalid-email-" + SUF.get());
+
+        mockMvc.perform(patch("/api/admin/users/{id}", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"no-es-email\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id} body vacío -> 400")
+    void bodyVacioDevuelve400() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "empty-body-" + SUF.get());
+
+        mockMvc.perform(patch("/api/admin/users/{id}", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id} usuario inexistente -> 404")
+    void editarUsuarioInexistenteDevuelve404() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        mockMvc.perform(patch("/api/admin/users/{id}", 999999L)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"nuevo\"}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id} sin token -> 401")
+    void patchSinTokenDevuelve401() throws Exception {
+        mockMvc.perform(patch("/api/admin/users/{id}", 1L)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"nuevo\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id} JWT Android -> 401")
+    void patchJwtAndroidDevuelve401() throws Exception {
+        String androidEmail = userEmail();
+        String androidToken = loginUsuario(androidEmail);
+
+        mockMvc.perform(patch("/api/admin/users/{id}", 1L)
+                        .header("Authorization", "Bearer " + androidToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"nuevo\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ========================================================================
+    // PATCH /api/admin/users/{id}/enabled - ENABLED/DISABLED
+    // ========================================================================
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id}/enabled deshabilitar usuario")
+    void deshabilitarUsuario() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "disable-user-" + SUF.get());
+
+        mockMvc.perform(patch("/api/admin/users/{id}/enabled", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(false));
+
+        assertThat(usuarioRepository.findById(usuario.getId()).get().getEnabled()).isFalse();
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id}/enabled habilitar usuario")
+    void habilitarUsuario() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "enable-user-" + SUF.get());
+        usuario.setEnabled(false);
+        usuarioRepository.save(usuario);
+
+        mockMvc.perform(patch("/api/admin/users/{id}/enabled", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(true));
+
+        assertThat(usuarioRepository.findById(usuario.getId()).get().getEnabled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Deshabilitar usuario revoca refresh tokens activos")
+    void deshabilitarRevocaRefreshTokens() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "revoke-user-" + SUF.get());
+
+        com.tareas.app.model.RefreshToken rt = com.tareas.app.model.RefreshToken.builder()
+                .usuario(usuario)
+                .tokenHash("hash-activo-" + SUF.incrementAndGet())
+                .createdAt(LocalDateTime.now())
+                .expiresAt(LocalDateTime.now().plusDays(30))
+                .build();
+        refreshTokenRepository.save(rt);
+
+        mockMvc.perform(patch("/api/admin/users/{id}/enabled", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":false}"))
+                .andExpect(status().isOk());
+
+        com.tareas.app.model.RefreshToken rtActualizado = refreshTokenRepository.findById(rt.getId()).get();
+        assertThat(rtActualizado.getRevokedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id}/enabled usuario inexistente -> 404")
+    void enabledUsuarioInexistenteDevuelve404() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        mockMvc.perform(patch("/api/admin/users/{id}/enabled", 999999L)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":false}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("PATCH /api/admin/users/{id}/enabled JWT Android -> 401")
+    void enabledJwtAndroidDevuelve401() throws Exception {
+        String androidEmail = userEmail();
+        String androidToken = loginUsuario(androidEmail);
+
+        mockMvc.perform(patch("/api/admin/users/{id}/enabled", 1L)
+                        .header("Authorization", "Bearer " + androidToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":false}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ========================================================================
+    // DELETE /api/admin/users/{id} - ELIMINAR USUARIO
+    // ========================================================================
+
+    @Test
+    @DisplayName("DELETE /api/admin/users/{id} elimina usuario -> 204")
+    void eliminarUsuarioDevuelve204() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "delete-user-" + SUF.get());
+
+        mockMvc.perform(delete("/api/admin/users/{id}", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNoContent());
+
+        assertThat(usuarioRepository.findById(usuario.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("DELETE /api/admin/users/{id} usuario deja de existir")
+    void eliminarUsuarioNoExiste() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "gone-user-" + SUF.get());
+
+        mockMvc.perform(delete("/api/admin/users/{id}", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNoContent());
+
+        assertThat(usuarioRepository.existsById(usuario.getId())).isFalse();
+    }
+
+    @Test
+    @DisplayName("DELETE /api/admin/users/{id} elimina tareas relacionadas")
+    void eliminarUsuarioEliminaTareas() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "delete-tasks-" + SUF.get());
+        crearTareasParaUsuario(usuario, 3);
+
+        long tareaCount = tareaRepository.count();
+
+        mockMvc.perform(delete("/api/admin/users/{id}", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNoContent());
+
+        assertThat(tareaRepository.count()).isLessThan(tareaCount);
+    }
+
+    @Test
+    @DisplayName("DELETE /api/admin/users/{id} elimina tipos de tarea relacionados")
+    void eliminarUsuarioEliminaTipos() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "delete-types-" + SUF.get());
+        crearTipoTareaPara(usuario, "TipoDel-" + SUF.incrementAndGet(), "#FF5733");
+        crearTipoTareaPara(usuario, "TipoDel2-" + SUF.incrementAndGet(), "#33FF57");
+
+        long tipoCount = tipoTareaRepository.count();
+
+        mockMvc.perform(delete("/api/admin/users/{id}", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNoContent());
+
+        assertThat(tipoTareaRepository.count()).isLessThan(tipoCount);
+    }
+
+    @Test
+    @DisplayName("DELETE /api/admin/users/{id} elimina refresh tokens")
+    void eliminarUsuarioEliminaRefreshTokens() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "delete-rt-" + SUF.get());
+
+        com.tareas.app.model.RefreshToken rt = com.tareas.app.model.RefreshToken.builder()
+                .usuario(usuario)
+                .tokenHash("hash-delete-" + SUF.incrementAndGet())
+                .createdAt(LocalDateTime.now())
+                .expiresAt(LocalDateTime.now().plusDays(30))
+                .build();
+        refreshTokenRepository.save(rt);
+
+        mockMvc.perform(delete("/api/admin/users/{id}", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNoContent());
+
+        assertThat(refreshTokenRepository.existsById(rt.getId())).isFalse();
+    }
+
+    @Test
+    @DisplayName("DELETE /api/admin/users/{id} usuario inexistente -> 404")
+    void eliminarUsuarioInexistenteDevuelve404() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        mockMvc.perform(delete("/api/admin/users/{id}", 999999L)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/admin/users/{id} sin token -> 401")
+    void deleteSinTokenDevuelve401() throws Exception {
+        mockMvc.perform(delete("/api/admin/users/{id}", 1L))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/admin/users/{id} JWT Android -> 401")
+    void deleteJwtAndroidDevuelve401() throws Exception {
+        String androidEmail = userEmail();
+        String androidToken = loginUsuario(androidEmail);
+
+        mockMvc.perform(delete("/api/admin/users/{id}", 1L)
+                        .header("Authorization", "Bearer " + androidToken))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/admin/users/{id} JWT admin -> permitido")
+    void deleteJwtAdminPermitido() throws Exception {
+        String admEmail = email();
+        crearAdmin(admEmail);
+        String adminToken = loginAdmin(admEmail);
+
+        String uEmail = userEmail();
+        Usuario usuario = crearUsuario(uEmail, "admin-can-delete-" + SUF.get());
+
+        mockMvc.perform(delete("/api/admin/users/{id}", usuario.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNoContent());
     }
 
     // ========================================================================

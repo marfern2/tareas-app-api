@@ -11,6 +11,9 @@ public interface AdminTareaRepository extends JpaRepository<Tarea, Long> {
 
     Page<Tarea> findByUsuarioIdOrderByFechaDesc(Long usuarioId, Pageable pageable);
 
+    @Query("SELECT COUNT(t) FROM Tarea t WHERE t.usuario.id = :usuarioId")
+    long countByUsuarioId(@Param("usuarioId") Long usuarioId);
+
     @Query("SELECT COUNT(t) FROM Tarea t WHERE t.usuario.id = :usuarioId AND t.completada = true")
     long countCompletedByUsuarioId(@Param("usuarioId") Long usuarioId);
 

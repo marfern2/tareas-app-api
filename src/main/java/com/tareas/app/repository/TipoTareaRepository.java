@@ -17,4 +17,6 @@ public interface TipoTareaRepository extends JpaRepository<TipoTarea, Long> {
     boolean existsByNombreIgnoreCaseAndUsuarioEmail(String nombre, String email);
 
     boolean existsByIdAndUsuarioEmail(Long id, String email);
+
+    List<TipoTarea> findByUsuarioId(Long usuarioId);
 }

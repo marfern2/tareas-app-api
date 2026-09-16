@@ -63,12 +63,12 @@ class FlywayPostgresqlTest {
     private TareaRepository tareaRepository;
 
     @Test
-    @DisplayName("Flyway ejecuta V1+V2+V3 en PostgreSQL vacio, validate pasa y los repositorios funcionan")
+    @DisplayName("Flyway ejecuta V1+V2+V3+V4 en PostgreSQL vacio, validate pasa y los repositorios funcionan")
     void migracionDesdeCeroYFuncionamientoBasico() {
-        // 1. flyway_schema_history contiene exactamente V1, V2 y V3 (success=true)
+        // 1. flyway_schema_history contiene exactamente V1, V2, V3 y V4 (success=true)
         List<Map<String, Object>> history = jdbcTemplate.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertThat(history).hasSize(3);
+        assertThat(history).hasSize(4);
         assertThat(history.get(0).get("version")).isEqualTo("1");
         assertThat(history.get(0).get("type")).isEqualTo("SQL");
         assertThat(history.get(0).get("success")).isEqualTo(true);
@@ -78,12 +78,16 @@ class FlywayPostgresqlTest {
         assertThat(history.get(2).get("version")).isEqualTo("3");
         assertThat(history.get(2).get("type")).isEqualTo("SQL");
         assertThat(history.get(2).get("success")).isEqualTo(true);
+        assertThat(history.get(3).get("version")).isEqualTo("4");
+        assertThat(history.get(3).get("type")).isEqualTo("SQL");
+        assertThat(history.get(3).get("success")).isEqualTo(true);
 
-        // 2. Flyway informa V1, V2 y V3 como aplicadas y sin pendientes
+        // 2. Flyway informa V1, V2, V3 y V4 como aplicadas y sin pendientes
         MigrationInfo[] applied = flyway.info().applied();
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "1".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "2".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "3".equals(m.getVersion().getVersion()));
+        assertThat(applied).anyMatch(m -> m.getVersion() != null && "4".equals(m.getVersion().getVersion()));
         assertThat(flyway.info().pending()).isEmpty();
 
         // 3. Las tablas existen (Hibernate validate ya ha arrancado el contexto)
