@@ -1,16 +1,26 @@
 package com.tareas.app.admin.service;
 
 import com.tareas.app.admin.dto.AdminPageDTO;
+import com.tareas.app.admin.dto.AdminSetUserEnabledRequest;
 import com.tareas.app.admin.dto.AdminTaskTypeSummaryDTO;
+import com.tareas.app.admin.dto.AdminUpdateUserRequest;
 import com.tareas.app.admin.dto.AdminUserDetailDTO;
 import com.tareas.app.admin.dto.AdminUserSummaryDTO;
 import com.tareas.app.admin.dto.AdminUserTaskSummaryDTO;
 import com.tareas.app.admin.repository.AdminTareaRepository;
 import com.tareas.app.admin.repository.AdminTipoTareaRepository;
 import com.tareas.app.admin.repository.AdminUsuarioRepository;
+import com.tareas.app.exception.ResourceConflictException;
 import com.tareas.app.exception.ResourceNotFoundException;
+import com.tareas.app.exception.ValidacionException;
 import com.tareas.app.model.Tarea;
+import com.tareas.app.model.TipoTarea;
+import com.tareas.app.model.Usuario;
+import com.tareas.app.repository.RefreshTokenRepository;
+import com.tareas.app.repository.TareaRepository;
+import com.tareas.app.repository.TipoTareaRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -18,8 +28,11 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AdminUserService {
@@ -27,6 +40,9 @@ public class AdminUserService {
     private final AdminUsuarioRepository adminUsuarioRepository;
     private final AdminTareaRepository adminTareaRepository;
     private final AdminTipoTareaRepository adminTipoTareaRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
+    private final TareaRepository tareaRepository;
+    private final TipoTareaRepository tipoTareaRepository;
 
     private static final Set<String> ALLOWED_SORT_FIELDS_TASK_TYPES = Set.of("id", "nombre", "color");
 
@@ -69,6 +85,7 @@ public class AdminUserService {
                 agg.getId(),
                 agg.getUsername(),
                 agg.getEmail(),
+                Boolean.TRUE.equals(agg.getEnabled()),
                 totalTasks,
                 completedTasks,
                 totalTasks - completedTasks,
@@ -125,6 +142,117 @@ public class AdminUserService {
                 ));
 
         return new AdminPageDTO<>(dtoPage);
+    }
+
+    @Transactional
+    public AdminUserDetailDTO actualizarUsuario(Long id, AdminUpdateUserRequest request) {
+        boolean hasUsername = request.getUsername() != null && !request.getUsername().isBlank();
+        boolean hasEmail = request.getEmail() != null && !request.getEmail().isBlank();
+
+        if (!hasUsername && !hasEmail) {
+            throw new ValidacionException("body", "El body no puede estar vacío");
+        }
+
+        Usuario usuario = adminUsuarioRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+
+        if (request.getUsername() != null && request.getUsername().isBlank()) {
+            throw new ValidacionException("username", "El username no puede estar vacío");
+        }
+
+        if (request.getEmail() != null && request.getEmail().isBlank()) {
+            throw new ValidacionException("email", "El email no puede estar vacío");
+        }
+
+        if (request.getUsername() != null && !request.getUsername().isBlank()) {
+            adminUsuarioRepository.findByUsername(request.getUsername().trim())
+                    .ifPresent(existing -> {
+                        if (!existing.getId().equals(id)) {
+                            throw new ResourceConflictException("El username ya está en uso por otro usuario");
+                        }
+                    });
+            usuario.setUsername(request.getUsername().trim());
+        }
+
+        if (request.getEmail() != null && !request.getEmail().isBlank()) {
+            adminUsuarioRepository.findByEmail(request.getEmail().trim())
+                    .ifPresent(existing -> {
+                        if (!existing.getId().equals(id)) {
+                            throw new ResourceConflictException("El email ya está en uso por otro usuario");
+                        }
+                    });
+            usuario.setEmail(request.getEmail().trim());
+        }
+
+        adminUsuarioRepository.save(usuario);
+
+        long totalTasks = adminTareaRepository.countByUsuarioId(id);
+        long completedTasks = adminTareaRepository.countCompletedByUsuarioId(id);
+
+        return new AdminUserDetailDTO(
+                usuario.getId(),
+                usuario.getUsername(),
+                usuario.getEmail(),
+                Boolean.TRUE.equals(usuario.getEnabled()),
+                totalTasks,
+                completedTasks,
+                totalTasks - completedTasks,
+                adminTipoTareaRepository.countByUsuarioId(id)
+        );
+    }
+
+    @Transactional
+    public AdminUserDetailDTO actualizarEnabled(Long id, AdminSetUserEnabledRequest request) {
+        Usuario usuario = adminUsuarioRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+
+        boolean wasEnabled = Boolean.TRUE.equals(usuario.getEnabled());
+        usuario.setEnabled(request.isEnabled());
+        adminUsuarioRepository.save(usuario);
+
+        if (wasEnabled && !request.isEnabled()) {
+            revocarRefreshTokensPorUsuario(id);
+            log.info("Usuario {} deshabilitado, refresh tokens revocados", id);
+        }
+
+        long totalTasks = adminTareaRepository.countByUsuarioId(id);
+        long completedTasks = adminTareaRepository.countCompletedByUsuarioId(id);
+
+        return new AdminUserDetailDTO(
+                usuario.getId(),
+                usuario.getUsername(),
+                usuario.getEmail(),
+                Boolean.TRUE.equals(usuario.getEnabled()),
+                totalTasks,
+                completedTasks,
+                totalTasks - completedTasks,
+                adminTipoTareaRepository.countByUsuarioId(id)
+        );
+    }
+
+    @Transactional
+    public void eliminarUsuario(Long id) {
+        Usuario usuario = adminUsuarioRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+
+        List<Tarea> tareas = tareaRepository.findByUsuarioId(id);
+        if (!tareas.isEmpty()) {
+            tareaRepository.deleteAll(tareas);
+        }
+
+        List<TipoTarea> tipos = tipoTareaRepository.findByUsuarioId(id);
+        if (!tipos.isEmpty()) {
+            tipoTareaRepository.deleteAll(tipos);
+        }
+
+        refreshTokenRepository.eliminarPorUsuario(id);
+
+        adminUsuarioRepository.delete(usuario);
+        log.info("Usuario {} eliminado junto con {} tareas y {} tipos de tarea", id, tareas.size(), tipos.size());
+    }
+
+    private void revocarRefreshTokensPorUsuario(Long usuarioId) {
+        refreshTokenRepository.revocarTodosPorUsuario(usuarioId, LocalDateTime.now());
     }
 
     private Pageable buildPageable(int page, int size, String sort) {

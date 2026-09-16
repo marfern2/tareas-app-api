@@ -28,4 +28,8 @@ public class Usuario {
     @NotBlank(message = "La contraseña es obligatoria")
     @Column(nullable = false)
     private String password; // Aqui se guardara la contraseña que va encriptada
+
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean enabled = true;
 }

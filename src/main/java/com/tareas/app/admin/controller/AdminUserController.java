@@ -1,11 +1,14 @@
 package com.tareas.app.admin.controller;
 
 import com.tareas.app.admin.dto.AdminPageDTO;
+import com.tareas.app.admin.dto.AdminSetUserEnabledRequest;
 import com.tareas.app.admin.dto.AdminTaskTypeSummaryDTO;
+import com.tareas.app.admin.dto.AdminUpdateUserRequest;
 import com.tareas.app.admin.dto.AdminUserDetailDTO;
 import com.tareas.app.admin.dto.AdminUserSummaryDTO;
 import com.tareas.app.admin.dto.AdminUserTaskSummaryDTO;
 import com.tareas.app.admin.service.AdminUserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -55,5 +58,30 @@ public class AdminUserController {
 
         log.info("Admin request: tipos de tarea del usuario ID={} - page={}, size={}, sort={}", id, page, size, sort);
         return ResponseEntity.ok(adminUserService.listarTiposUsuario(id, page, size, sort));
+    }
+
+    @PatchMapping("/{id}")
+    public ResponseEntity<AdminUserDetailDTO> actualizarUsuario(
+            @PathVariable Long id,
+            @Valid @RequestBody AdminUpdateUserRequest request) {
+
+        log.info("Admin request: actualizar usuario ID={}", id);
+        return ResponseEntity.ok(adminUserService.actualizarUsuario(id, request));
+    }
+
+    @PatchMapping("/{id}/enabled")
+    public ResponseEntity<AdminUserDetailDTO> actualizarEnabled(
+            @PathVariable Long id,
+            @RequestBody AdminSetUserEnabledRequest request) {
+
+        log.info("Admin request: actualizar enabled usuario ID={} -> {}", id, request.isEnabled());
+        return ResponseEntity.ok(adminUserService.actualizarEnabled(id, request));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> eliminarUsuario(@PathVariable Long id) {
+        log.info("Admin request: eliminar usuario ID={}", id);
+        adminUserService.eliminarUsuario(id);
+        return ResponseEntity.noContent().build();
     }
 }

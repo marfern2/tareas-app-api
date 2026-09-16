@@ -11,6 +11,7 @@ public class AdminUserDetailDTO {
     private Long id;
     private String username;
     private String email;
+    private boolean enabled;
     private long totalTasks;
     private long completedTasks;
     private long pendingTasks;

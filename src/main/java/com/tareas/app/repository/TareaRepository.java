@@ -17,4 +17,6 @@ public interface TareaRepository extends JpaRepository<Tarea, Long> {
     boolean existsByTipoTareaIdAndUsuarioEmail(Long tipoTareaId, String email);
 
     void deleteByIdAndUsuarioEmail(Long id, String email);
+
+    List<Tarea> findByUsuarioId(Long usuarioId);
 }
