@@ -23,6 +23,7 @@ public class CustomUserDetailsService implements UserDetailsService {
         return User.builder()
                 .username(usuario.getEmail()) // Usamos email como username para auth
                 .password(usuario.getPassword())
+                .disabled(!usuario.getEnabled())
                 .roles("USER")
                 .build();
     }
