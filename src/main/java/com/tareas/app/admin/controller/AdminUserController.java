@@ -1,16 +1,21 @@
 package com.tareas.app.admin.controller;
 
+import com.tareas.app.admin.dto.AdminCreateTaskRequest;
 import com.tareas.app.admin.dto.AdminPageDTO;
 import com.tareas.app.admin.dto.AdminSetUserEnabledRequest;
+import com.tareas.app.admin.dto.AdminTaskDetailDTO;
 import com.tareas.app.admin.dto.AdminTaskTypeSummaryDTO;
+import com.tareas.app.admin.dto.AdminUpdateTaskRequest;
 import com.tareas.app.admin.dto.AdminUpdateUserRequest;
 import com.tareas.app.admin.dto.AdminUserDetailDTO;
 import com.tareas.app.admin.dto.AdminUserSummaryDTO;
 import com.tareas.app.admin.dto.AdminUserTaskSummaryDTO;
+import com.tareas.app.admin.service.AdminTaskService;
 import com.tareas.app.admin.service.AdminUserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 public class AdminUserController {
 
     private final AdminUserService adminUserService;
+    private final AdminTaskService adminTaskService;
 
     @GetMapping
     public ResponseEntity<AdminPageDTO<AdminUserSummaryDTO>> listarUsuarios(
@@ -82,6 +88,40 @@ public class AdminUserController {
     public ResponseEntity<Void> eliminarUsuario(@PathVariable Long id) {
         log.info("Admin request: eliminar usuario ID={}", id);
         adminUserService.eliminarUsuario(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ========================================================================
+    // CRUD de tareas del usuario
+    // ========================================================================
+
+    @PostMapping("/{id}/tasks")
+    public ResponseEntity<AdminTaskDetailDTO> crearTarea(
+            @PathVariable Long id,
+            @Valid @RequestBody AdminCreateTaskRequest request) {
+
+        log.info("Admin request: crear tarea para usuario ID={}", id);
+        AdminTaskDetailDTO tarea = adminTaskService.crearTarea(id, request);
+        return new ResponseEntity<>(tarea, HttpStatus.CREATED);
+    }
+
+    @PatchMapping("/{id}/tasks/{taskId}")
+    public ResponseEntity<AdminTaskDetailDTO> actualizarTarea(
+            @PathVariable Long id,
+            @PathVariable Long taskId,
+            @Valid @RequestBody AdminUpdateTaskRequest request) {
+
+        log.info("Admin request: actualizar tarea ID={} del usuario ID={}", taskId, id);
+        return ResponseEntity.ok(adminTaskService.actualizarTarea(id, taskId, request));
+    }
+
+    @DeleteMapping("/{id}/tasks/{taskId}")
+    public ResponseEntity<Void> eliminarTarea(
+            @PathVariable Long id,
+            @PathVariable Long taskId) {
+
+        log.info("Admin request: eliminar tarea ID={} del usuario ID={}", taskId, id);
+        adminTaskService.eliminarTarea(id, taskId);
         return ResponseEntity.noContent().build();
     }
 }
