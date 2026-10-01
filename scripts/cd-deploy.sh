@@ -68,6 +68,7 @@ if ! docker manifest inspect "${IMAGE}:${target_tag}" >/dev/null 2>&1; then
 fi
 
 prev_tag="$(sed -n 's/^API_IMAGE_TAG=//p' "${ENV_FILE}" | tail -n1 | tr -d '\r' || true)"
+prev_sha="$(cat "${MARKER}" 2>/dev/null || true)"
 mkdir -p "${BACKUP_DIR}"
 backup_env="${BACKUP_DIR}/.env-$(date +%Y%m%d-%H%M%S).bak"
 if ! cp -a "${ENV_FILE}" "${backup_env}"; then
@@ -77,26 +78,27 @@ fi
 chmod 600 "${backup_env}"
 
 tmp_env="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
-trap 'rm -f "${tmp_env}"' EXIT
-awk -v t="${target_tag}" '
-  /^API_IMAGE_TAG=/ { seen=1; print "API_IMAGE_TAG=" t; next }
-  { print }
-  END { if (!seen) print "API_IMAGE_TAG=" t }
-' "${ENV_FILE}" > "${tmp_env}" && mv "${tmp_env}" "${ENV_FILE}"
-chmod 600 "${ENV_FILE}"
-log "imagen objetivo=${target_tag} anterior=${prev_tag:-desconocida}"
+cleanup() { rm -f "${tmp_env}"; }
+trap cleanup EXIT
 
 compose=(docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}")
-if ! "${compose[@]}" pull api; then
-  cp -a "${backup_env}" "${ENV_FILE}" && chmod 600 "${ENV_FILE}"
-  log "ESTADO=1 pull fallo"
-  exit 1
-fi
-if ! "${compose[@]}" up -d --no-deps api >>"${LOG_FILE}" 2>&1; then
-  cp -a "${backup_env}" "${ENV_FILE}" && chmod 600 "${ENV_FILE}"
-  log "ESTADO=1 compose up fallo"
-  exit 1
-fi
+restore_env() {
+  local restored
+  restored="$(mktemp "${ENV_FILE}.restore.XXXXXX")" || return 1
+  if ! cp -a "${backup_env}" "${restored}" || ! chmod 600 "${restored}" || ! mv -f "${restored}" "${ENV_FILE}"; then
+    rm -f "${restored}"
+    return 1
+  fi
+}
+
+write_marker() {
+  local marker="$1" sha="$2" tmp
+  tmp="$(mktemp "${marker}.tmp.XXXXXX")" || return 1
+  if ! printf '%s' "${sha}" > "${tmp}" || ! chmod 600 "${tmp}" || ! mv -f "${tmp}" "${marker}"; then
+    rm -f "${tmp}"
+    return 1
+  fi
+}
 
 check_health() {
   local url="$1" attempts="${2:-24}" delay="${3:-5}" resp
@@ -112,35 +114,83 @@ check_health() {
 
 rollback() {
   log "ROLLBACK aplicacion: restaurando .env anterior; no se revierte la DB"
-  cp -a "${backup_env}" "${ENV_FILE}" && chmod 600 "${ENV_FILE}"
-  "${compose[@]}" up -d --no-deps api >/dev/null 2>&1 || true
-  sleep 15
+  if ! restore_env; then
+    log "ROLLBACK fallo: no se pudo restaurar .env"
+    return 1
+  fi
+  if [[ ! "${prev_sha}" =~ ^[0-9a-f]{40}$ || "${prev_tag}" != "${prev_sha}" ]]; then
+    log "ROLLBACK fallo: no hay SHA anterior valido y coincidente con .env (bootstrap o estado inconsistente)"
+    return 1
+  fi
+  if ! docker image inspect "${IMAGE}:${prev_sha}" >/dev/null 2>&1; then
+    log "ROLLBACK fallo: imagen anterior ${IMAGE}:${prev_sha} no disponible localmente"
+    return 1
+  fi
+  if ! "${compose[@]}" up -d --no-deps api >>"${LOG_FILE}" 2>&1; then
+    log "ROLLBACK fallo: compose up de la imagen anterior fallo"
+    return 1
+  fi
+  if ! sleep 15; then
+    log "ROLLBACK fallo: espera de arranque interrumpida"
+    return 1
+  fi
+  if ! check_health "${LOCAL_HEALTH}" 24 5 || ! check_health "${PUBLIC_HEALTH}" 12 10; then
+    log "ROLLBACK fallo: health de la imagen anterior fallo"
+    return 1
+  fi
+  write_marker "${MARKER}" "${prev_sha}"
 }
 
-fail_state() {
-  local code="$1"; shift
-  printf '%s' "${target}" > "${FAILED_MARKER}"
-  chmod 600 "${FAILED_MARKER}"
-  log "ESTADO=${code} $*"
+fail_with_rollback() {
+  local reason="$1" code=4
+  trap '' HUP INT TERM
+  trap - ERR
+  if rollback; then
+    code=3
+  else
+    # The previous SHA is no longer verified as the running healthy version.
+    if ! rm -f "${MARKER}"; then
+      log "ERROR: no se pudo invalidar .deployed-sha"
+    fi
+  fi
+  if ! write_marker "${FAILED_MARKER}" "${target}"; then
+    log "ERROR: no se pudo registrar .failed-sha"
+    code=4
+  fi
+  log "ESTADO=${code} ${reason}; rollback aplicacion $([[ ${code} -eq 3 ]] && printf OK || printf FALLO)"
   exit "${code}"
 }
 
-if ! check_health "${LOCAL_HEALTH}" 30 5; then
-  rollback
-  if check_health "${LOCAL_HEALTH}" 24 5; then
-    fail_state 3 "health local fallo; rollback aplicacion OK"
+trap 'fail_with_rollback "interrupcion"' HUP INT TERM
+trap 'fail_with_rollback "error inesperado"' ERR
+awk -v t="${target_tag}" '
+  /^API_IMAGE_TAG=/ { seen=1; print "API_IMAGE_TAG=" t; next }
+  { print }
+  END { if (!seen) print "API_IMAGE_TAG=" t }
+' "${ENV_FILE}" > "${tmp_env}"
+chmod 600 "${tmp_env}"
+mv "${tmp_env}" "${ENV_FILE}"
+log "imagen objetivo=${target_tag} anterior=${prev_tag:-desconocida}"
+if ! "${compose[@]}" pull api; then
+  if ! restore_env; then
+    log "ESTADO=4 pull fallo y no se pudo restaurar .env"
+    exit 4
   fi
-  fail_state 4 "health local y rollback fallaron"
+  log "ESTADO=1 pull fallo"
+  exit 1
 fi
-if ! check_health "${PUBLIC_HEALTH}" 12 10; then
-  rollback
-  if check_health "${PUBLIC_HEALTH}" 12 10 && check_health "${LOCAL_HEALTH}" 12 5; then
-    fail_state 3 "health publico fallo; rollback aplicacion OK"
-  fi
-  fail_state 4 "health publico y rollback fallaron"
+if ! "${compose[@]}" up -d --no-deps api >>"${LOG_FILE}" 2>&1; then
+  fail_with_rollback "compose up fallo"
 fi
 
-printf '%s' "${target}" > "${MARKER}"
-chmod 600 "${MARKER}"
+if ! check_health "${LOCAL_HEALTH}" 30 5; then
+  fail_with_rollback "health local fallo"
+fi
+if ! check_health "${PUBLIC_HEALTH}" 12 10; then
+  fail_with_rollback "health publico fallo"
+fi
+
+write_marker "${MARKER}" "${target}"
+trap - HUP INT TERM ERR
 rm -f "${FAILED_MARKER}"
 log "ESTADO=0 DEPLOY OK sha=${target} tag=${target_tag}"
