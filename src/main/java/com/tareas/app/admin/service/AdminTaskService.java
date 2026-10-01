@@ -43,7 +43,7 @@ public class AdminTaskService {
 
         Pageable pageable = buildPageable(page, size, sort);
         Page<Tarea> tareaPage = adminTareaRepository.findGlobalWithFilters(
-                search != null ? search.trim() : null,
+                search != null ? search.trim() : "",
                 userId, completed, urgency, taskTypeId, pageable);
 
         Page<AdminTaskSummaryDTO> dtoPage = tareaPage.map(t -> new AdminTaskSummaryDTO(

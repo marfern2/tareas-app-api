@@ -1,0 +1,13 @@
+[Unit]
+Description=Poller CD tareas-app-api DEV
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=mar
+Group=mar
+WorkingDirectory=/srv/docker/tareas-app-api-dev
+Environment=DEPLOY_ENV=dev
+ExecStart=/srv/docker/tareas-app-api-dev/scripts/cd-poll.sh
+TimeoutStartSec=10min
