@@ -1,0 +1,10 @@
+[Unit]
+Description=Monitor de salud tareas-app-api DEV
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=mar
+Group=mar
+WorkingDirectory=/srv/docker/tareas-app-api-dev
+ExecStart=/srv/docker/tareas-app-api-dev/scripts/monitor-health-dev.sh

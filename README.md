@@ -34,7 +34,7 @@ Está pensada para ser consumida desde una aplicación Android y otros clientes 
 - Validación de datos
 - Documentación de endpoints con Swagger
 - Persistencia de datos con JPA
-- Configuración separada para desarrollo y producción
+- Configuración separada para LOCAL, DEV y producción
 - Despliegue mediante Docker Compose
 - Healthcheck mediante Spring Boot Actuator
 - Copias de seguridad de PostgreSQL
@@ -151,14 +151,16 @@ No deben subirse al repositorio contraseñas, secretos JWT ni archivos `.env`.
 
 ---
 
-## Bases de datos
+## Entornos y bases de datos
 
 La aplicación puede utilizar:
 
-- H2 para desarrollo
-- PostgreSQL para producción
+- H2 para tests rápidos sin perfil
+- PostgreSQL independiente para LOCAL, DEV y PROD
 
 En el despliegue Docker, PostgreSQL se ejecuta en un contenedor independiente y no publica su puerto `5432` hacia el host.
+
+La matriz completa, comandos, tags, seed y limitaciones de rollback están en [docs/ENTORNOS.md](docs/ENTORNOS.md).
 
 ---
 

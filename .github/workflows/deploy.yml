@@ -4,9 +4,10 @@ name: deploy
 # el servidor detecta el SHA nuevo con cd-poll.sh (timer futuro, no activado aun)
 # y ejecuta cd-deploy.sh.
 #
-# - push a master       -> publica ghcr.io/...:<sha12> y ghcr.io/...:master
-# - workflow_dispatch   -> publica SOLO ghcr.io/...:<sha12> del SHA indicado
-#                          (redeploy/rollback manual; no toca la etiqueta master)
+# - cada commit se construye una sola vez como <sha40>;
+# - push a develop      -> promueve tambien el alias develop;
+# - push a master       -> promueve tambien el alias master;
+# - workflow_dispatch   -> exige el GitHub Environment destino.
 #
 # Autenticacion GHCR con GITHUB_TOKEN. Sin PAT, sin secretos SSH.
 
@@ -14,20 +15,24 @@ on:
   push:
     branches:
       - master
+      - develop
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: 'Commit SHA a publicar en GHCR (redeploy/rollback manual). Vacio = master.'
+        description: "Commit SHA a publicar en GHCR (redeploy/rollback manual). Vacio = master."
         required: false
-        default: ''
+        default: ""
+      target_environment:
+        description: "Canal de imagen; evita mezclar DEV y PROD."
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
 
 permissions:
   contents: read
   packages: write
-
-concurrency:
-  group: production-deploy
-  cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/marfern2/tareas-app-api
@@ -36,6 +41,13 @@ jobs:
   verify-and-push:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment:
+      name: ${{ (((github.event_name == 'workflow_dispatch') && (inputs.target_environment == 'dev')) || ((github.event_name != 'workflow_dispatch') && (github.ref_name == 'develop'))) && 'development' || 'production' }}
+      url: ${{ (((github.event_name == 'workflow_dispatch') && (inputs.target_environment == 'dev')) || ((github.event_name != 'workflow_dispatch') && (github.ref_name == 'develop'))) && 'https://donit-api-dev.marfern.dev' || 'https://donit-api.marfern.dev' }}
+    concurrency:
+      group: backend-${{ (((github.event_name == 'workflow_dispatch') && (inputs.target_environment == 'dev')) || ((github.event_name != 'workflow_dispatch') && (github.ref_name == 'develop'))) && 'development' || 'production' }}
+      # DEV prioriza el ultimo commit. PROD nunca cancela una publicacion iniciada.
+      cancel-in-progress: ${{ ((github.event_name == 'workflow_dispatch') && (inputs.target_environment == 'dev')) || ((github.event_name != 'workflow_dispatch') && (github.ref_name == 'develop')) }}
 
     steps:
       - name: Checkout
@@ -47,7 +59,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: "21"
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -104,15 +116,29 @@ jobs:
       - name: Compute image tags
         id: meta
         shell: bash
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
         run: |
-          SHA="${{ inputs.commit_sha || github.sha }}"
+          SHA="${REQUESTED_SHA:-${GITHUB_SHA}}"
+          if [[ ! "$SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::commit_sha debe ser un SHA completo de 40 caracteres"
+            exit 2
+          fi
+          SHA="${SHA,,}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TARGET="$TARGET_ENVIRONMENT"
+          elif [ "$REF_NAME" = "develop" ]; then
+            TARGET=dev
+          else
+            TARGET=prod
+          fi
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "short=${SHA:0:12}" >> "$GITHUB_OUTPUT"
-          TAGS="${IMAGE}:${SHA:0:12}"
-          if [ -z "${{ inputs.commit_sha }}" ]; then
-            TAGS="${TAGS},${IMAGE}:master"
-          fi
-          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "target=${TARGET}" >> "$GITHUB_OUTPUT"
+          echo "immutable=${IMAGE}:${SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -124,13 +150,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Check immutable image
+        id: existing
+        shell: bash
+        run: |
+          if docker manifest inspect "${{ steps.meta.outputs.immutable }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build immutable image once
+        if: steps.existing.outputs.exists != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.meta.outputs.immutable }}
           build-args: |
             BUILD_SHA=${{ steps.meta.outputs.sha }}
           labels: |
@@ -138,3 +175,25 @@ jobs:
             org.opencontainers.image.revision=${{ steps.meta.outputs.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Publish branch alias and transition tag
+        shell: bash
+        run: |
+          SOURCE="${{ steps.meta.outputs.immutable }}"
+          TARGET="${{ steps.meta.outputs.target }}"
+          SHORT="${{ steps.meta.outputs.short }}"
+
+          # Compatibilidad durante el primer despliegue: los pollers que ya estan
+          # activos esperan dev-<sha12> (DEV) o <sha12> (PROD). Ambos tags
+          # apuntan al mismo digest y se podran retirar tras adoptar este cambio.
+          if [ "$TARGET" = "dev" ]; then
+            docker buildx imagetools create --tag "${IMAGE}:dev-${SHORT}" "$SOURCE"
+            if [ "${{ github.event_name }}" = "push" ]; then
+              docker buildx imagetools create --tag "${IMAGE}:develop" "$SOURCE"
+            fi
+          else
+            docker buildx imagetools create --tag "${IMAGE}:${SHORT}" "$SOURCE"
+            if [ "${{ github.event_name }}" = "push" ]; then
+              docker buildx imagetools create --tag "${IMAGE}:master" "$SOURCE"
+            fi
+          fi

@@ -1,0 +1,11 @@
+[Unit]
+Description=Monitor de salud tareas-app-api DEV cada cinco minutos
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

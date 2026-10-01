@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
 # Backup logico (pg_dump --format=custom) de PostgreSQL para tareas-app-api.
 # Se ejecuta dentro del contenedor tareas-postgres sin detener nada.
 # No imprime secretos. Escribe primero a un temporal y valida antes de renombrar.
 
-CONTAINER="tareas-postgres"
-BACKUP_DIR="/srv/docker/backups/tareas-app-postgres"
-RETENTION_DAYS=14
+CONTAINER="${BACKUP_CONTAINER:-tareas-postgres}"
+BACKUP_DIR="${BACKUP_DIR:-/srv/docker/backups/tareas-app-postgres}"
+BACKUP_PREFIX="${BACKUP_PREFIX:-tareas-app}"
+RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 MIN_BYTES=1024
 MIN_FREE_BYTES=$((512 * 1024 * 1024))
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-BACKUP_FILE="${BACKUP_DIR}/tareas-app-${TIMESTAMP}.dump"
+BACKUP_FILE="${BACKUP_DIR}/${BACKUP_PREFIX}-${TIMESTAMP}.dump"
 TMP_FILE="${BACKUP_FILE}.tmp.$$"
-STDERR_FILE="/tmp/tareas-pgdump-stderr.$$"
-VALIDATE_PATH="/tmp/tareas-backup-check.dump"
+STDERR_FILE="$(mktemp /tmp/tareas-pgdump-stderr.XXXXXX)"
+VALIDATE_PATH="/tmp/tareas-backup-check-$$.dump"
 
 log()   { echo "[backup-db $(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 error() { echo "[backup-db $(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2; }
@@ -24,7 +26,7 @@ cleanup() {
     rm -f "${TMP_FILE}"
     log "Temporal local eliminado: ${TMP_FILE}"
   fi
-  rm -f "${STDERR_FILE:-/tmp/tareas-pgdump-stderr.$$}"
+  rm -f "${STDERR_FILE}"
   if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "${CONTAINER}"; then
     docker exec "${CONTAINER}" rm -f "${VALIDATE_PATH}" >/dev/null 2>&1 || true
   fi
@@ -42,6 +44,11 @@ main() {
     exit 1
   fi
   chmod 700 "${BACKUP_DIR}"
+  exec 9>"${BACKUP_DIR}/.${BACKUP_PREFIX}.lock"
+  if ! flock -n 9; then
+    error "Ya hay un backup de ${BACKUP_PREFIX} en curso"
+    exit 1
+  fi
 
   # 2. Docker disponible y contenedor en ejecucion
   if ! command -v docker >/dev/null 2>&1; then
@@ -111,7 +118,7 @@ main() {
   log "Permisos: $(stat -c '%a %U:%G' "${BACKUP_FILE}")"
 
   # 9. Retencion: borrar solo el patron exacto y loguear lo borrado
-  deleted="$(find "${BACKUP_DIR}" -maxdepth 1 -type f -name 'tareas-app-*.dump' -mtime "+${RETENTION_DAYS}" -print -delete)"
+  deleted="$(find "${BACKUP_DIR}" -maxdepth 1 -type f -name "${BACKUP_PREFIX}-*.dump" -mtime "+${RETENTION_DAYS}" -print -delete)"
   if [[ -n "${deleted}" ]]; then
     while IFS= read -r f; do
       log "Retencion: eliminado ${f} (mas de ${RETENTION_DAYS} dias)"
@@ -121,7 +128,7 @@ main() {
   # 10. Resumen final
   duration="$(( $(date +%s) - start_time ))s"
   hash="$(sha256sum "${BACKUP_FILE}" | awk '{print $1}')"
-  count="$(find "${BACKUP_DIR}" -maxdepth 1 -type f -name 'tareas-app-*.dump' | wc -l)"
+  count="$(find "${BACKUP_DIR}" -maxdepth 1 -type f -name "${BACKUP_PREFIX}-*.dump" | wc -l)"
   log "Backup OK: ${BACKUP_FILE} ($(stat -c %s "${BACKUP_FILE}") bytes, ${duration}, sha256=${hash})"
   log "Total de backups retenidos: ${count}"
 }
