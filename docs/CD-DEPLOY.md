@@ -94,10 +94,23 @@ journalctl --user -u tareas-app-cd.service -n 50        # cuando exista el timer
 
 ## Sincronización de ficheros en el servidor
 
-`cd-deploy.sh` sincroniza **solo** `compose.yaml` y `scripts/` desde
-`origin/master` (mediante `git fetch` + `git archive`, sin `reset --hard` ni
-`git clean`). Nunca toca `.env`, `logs/`, `backups/`, `backups-antes-deploy/`,
-`.deployed-sha`, `.failed-sha` ni el resto del árbol.
+El poller obtiene el SHA candidato de `origin/develop` (DEV) o `origin/master`
+(PROD). El deploy hace `git fetch`, comprueba que ese SHA existe como commit
+local y extrae los ficheros con `git archive <sha>`; nunca usa la punta mutable
+de la rama para elegir el contenido. La imagen y `.deployed-sha` usan el mismo
+SHA. En rollback, el compose y los scripts se restauran desde el SHA anterior
+antes de recrear `api`.
+
+Se sincronizan solo estos ficheros versionados:
+
+| Entorno | Ficheros |
+|---|---|
+| DEV | `compose.dev.yaml`, `scripts/cd-deploy.sh`, `scripts/cd-poll.sh`, `scripts/backup-db.sh`, `scripts/monitor-health-dev.sh` |
+| PROD | `compose.yaml`, `scripts/cd-deploy.sh`, `scripts/cd-poll.sh`, `scripts/backup-db.sh`, `scripts/monitor-health.sh` |
+
+No se hace `reset --hard` ni `git clean`. `.env`, `logs/`, `backups/`,
+`backups-antes-deploy/`, `.deployed-sha`, `.failed-sha` y los demás ficheros
+quedan fuera de la sincronización.
 
 ## Requisito previo de GHCR
 
