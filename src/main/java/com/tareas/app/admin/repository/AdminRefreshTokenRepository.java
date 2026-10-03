@@ -25,4 +25,8 @@ public interface AdminRefreshTokenRepository extends JpaRepository<AdminRefreshT
     int eliminarExpiradosORevocados(
             @Param("ahora") LocalDateTime ahora,
             @Param("revocadosAntesDe") LocalDateTime revocadosAntesDe);
+
+    @Modifying
+    @Query("DELETE FROM AdminRefreshToken art WHERE art.adminUser.id = :adminUserId")
+    int deleteAllByAdminUserId(@Param("adminUserId") Long adminUserId);
 }

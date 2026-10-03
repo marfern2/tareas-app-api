@@ -1,0 +1,10 @@
+[Unit]
+Description=Backup PostgreSQL tareas-app-api DEV
+
+[Service]
+Type=oneshot
+Environment=BACKUP_CONTAINER=tareas-postgres-dev
+Environment=BACKUP_DIR=/srv/docker/backups/tareas-app-postgres-dev
+Environment=BACKUP_PREFIX=tareas-app-dev
+Environment=BACKUP_RETENTION_DAYS=3
+ExecStart=/srv/docker/tareas-app-api-dev/scripts/backup-db.sh

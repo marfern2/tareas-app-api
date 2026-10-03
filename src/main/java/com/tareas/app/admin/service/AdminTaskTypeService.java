@@ -31,7 +31,7 @@ public class AdminTaskTypeService {
         Pageable pageable = buildPageable(page, size, sort);
         Page<AdminTipoTareaRepository.TaskTypeAggregation> aggregationPage =
                 adminTipoTareaRepository.findGlobalWithTaskCounts(
-                        search != null ? search.trim() : null, pageable);
+                        search != null ? search.trim() : "", pageable);
 
         Page<AdminTaskTypeSummaryDTO> dtoPage = aggregationPage.map(agg ->
                 new AdminTaskTypeSummaryDTO(

@@ -1,22 +1,37 @@
 # CD — Continuous Deployment de tareas-app-api
 
-> Este documento describe el flujo automatizado. **En este PR el timer del
-> poller NO está activado**: los scripts están versionados y listos, pero el
-> servidor no ejecuta ningún despliegue automático todavía.
+El mismo script opera en dos contextos cerrados mediante `DEPLOY_ENV`. PROD
+mantiene su timer actual; DEV se activa solo después de publicar la rama
+`develop`, la imagen GHCR y los hostnames Cloudflare.
 
 ## Flujo automático (cuando el timer esté activado)
 
 ```
-merge a master (PR + security-scan verde)
-  -> GitHub Actions (deploy.yml) construye y publica:
-       ghcr.io/marfern2/tareas-app-api:<sha12>
-       ghcr.io/marfern2/tareas-app-api:master   (solo push a master)
-  -> servidor: cd-poll.sh (timer) detecta SHA nuevo en origin/master
-       -> cd-deploy.sh <sha> despliega SOLO el servicio api
+feature/* -> PR develop -> security-scan -> merge
+  -> ghcr.io/marfern2/tareas-app-api:<sha40>
+  -> poller DEV observa origin/develop y despliega solo tareas-api-dev
+
+develop -> PR master -> security-scan -> merge
+  -> ghcr.io/marfern2/tareas-app-api:<sha40>
+  -> poller PROD observa origin/master y despliega solo tareas-api
 ```
 
-`cd-deploy.sh` nunca ejecuta `docker compose down` y nunca toca
-`postgres`, `cloudflared` ni volúmenes.
+`cd-deploy.sh` nunca ejecuta `docker compose down` y nunca toca PostgreSQL,
+Cloudflare ni volúmenes. La imagen no contiene configuración de entorno: el
+perfil Spring, DB, JWT y CORS se inyectan desde el `.env` del servidor.
+
+Los aliases `develop` y `master` apuntan al digest correspondiente, pero el
+poller despliega siempre el tag inmutable SHA completo. Durante el primer
+despliegue se publican además tags de transición compatibles con los pollers
+ya instalados; no son la identidad canónica de la imagen.
+
+## GitHub Environments y concurrencia
+
+La publicación desde `develop` usa `environment: development` y el grupo
+`backend-development`, con cancelación del run anterior para priorizar el SHA
+más reciente. `master` usa `environment: production` y
+`backend-production`, sin cancelación: una publicación PROD iniciada termina
+de forma determinista antes de procesar otra.
 
 ## Estados
 
@@ -49,7 +64,7 @@ ls -t backups-antes-deploy/.env-*.bak
 cat .deployed-sha
 
 # Volver a un SHA anterior ya publicado (imagen conservada localmente)
-./scripts/cd-deploy.sh <sha-completo-40hex>
+DEPLOY_ENV=prod ./scripts/cd-deploy.sh <sha-completo-40hex>
 
 # Equivalente manual sin el script:
 #   cp backups-antes-deploy/.env-<ts>.bak .env && chmod 600 .env
@@ -61,13 +76,13 @@ cat .deployed-sha
 
 ```bash
 cd /srv/docker/tareas-app-api
-./scripts/cd-deploy.sh "$(cat .failed-sha)"
+DEPLOY_ENV=prod ./scripts/cd-deploy.sh "$(cat .failed-sha)"
 ```
 
 O, si se quiere volver a intentar el SHA actual de master:
 
 ```bash
-./scripts/cd-deploy.sh "$(git rev-parse origin/master)"
+DEPLOY_ENV=prod ./scripts/cd-deploy.sh "$(git rev-parse origin/master)"
 ```
 
 ## Logs
@@ -79,10 +94,23 @@ journalctl --user -u tareas-app-cd.service -n 50        # cuando exista el timer
 
 ## Sincronización de ficheros en el servidor
 
-`cd-deploy.sh` sincroniza **solo** `compose.yaml` y `scripts/` desde
-`origin/master` (mediante `git fetch` + `git archive`, sin `reset --hard` ni
-`git clean`). Nunca toca `.env`, `logs/`, `backups/`, `backups-antes-deploy/`,
-`.deployed-sha`, `.failed-sha` ni el resto del árbol.
+El poller obtiene el SHA candidato de `origin/develop` (DEV) o `origin/master`
+(PROD). El deploy hace `git fetch`, comprueba que ese SHA existe como commit
+local y extrae los ficheros con `git archive <sha>`; nunca usa la punta mutable
+de la rama para elegir el contenido. La imagen y `.deployed-sha` usan el mismo
+SHA. En rollback, el compose y los scripts se restauran desde el SHA anterior
+antes de recrear `api`.
+
+Se sincronizan solo estos ficheros versionados:
+
+| Entorno | Ficheros |
+|---|---|
+| DEV | `compose.dev.yaml`, `scripts/cd-deploy.sh`, `scripts/cd-poll.sh`, `scripts/backup-db.sh`, `scripts/monitor-health-dev.sh` |
+| PROD | `compose.yaml`, `scripts/cd-deploy.sh`, `scripts/cd-poll.sh`, `scripts/backup-db.sh`, `scripts/monitor-health.sh` |
+
+No se hace `reset --hard` ni `git clean`. `.env`, `logs/`, `backups/`,
+`backups-antes-deploy/`, `.deployed-sha`, `.failed-sha` y los demás ficheros
+quedan fuera de la sincronización.
 
 ## Requisito previo de GHCR
 

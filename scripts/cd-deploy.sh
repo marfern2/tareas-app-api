@@ -1,30 +1,38 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
-# =====================================================================
-# cd-deploy.sh — Despliega una imagen de GHCR en el servicio `api` de
-# tareas-app-api (produccion). SOLO se actualiza el servicio api.
-#
-# Exit codes:
-#   0 = deploy correcto
-#   1 = error operacional ANTES de modificar el servicio
-#       (imagen inexistente, git, pull, lock ocupado, compose up fallo)
-#   2 = uso invalido / SHA invalido
-#   3 = deploy falla pero el rollback funciona
-#   4 = deploy falla Y el rollback falla (CRITICO)
-#
-# Estados 3 y 4: el SHA se registra en .failed-sha y NO se reintenta
-# automaticamente. Reintento manual:
-#   scripts/cd-deploy.sh "$(cat .failed-sha)"
-#
-# PROHIBIDO: docker compose down. No se toca postgres ni cloudflared
-# (--no-deps + proyecto compose aislado). No se tocan volumenes ni
-# secretos distintos de API_IMAGE_TAG (solo se actualiza esa variable
-# del .env; el resto del .env se conserva y se respalda antes).
-# =====================================================================
-
-PROJECT_DIR="/srv/docker/tareas-app-api"
+DEPLOY_ENV="${DEPLOY_ENV:-prod}"
 IMAGE="ghcr.io/marfern2/tareas-app-api"
+
+case "${DEPLOY_ENV}" in
+  prod)
+    PROJECT_DIR="/srv/docker/tareas-app-api"
+    BRANCH="master"
+    COMPOSE_FILE="compose.yaml"
+    LOCAL_HEALTH="http://127.0.0.1:8080/actuator/health"
+    PUBLIC_HEALTH="https://donit-api.marfern.dev/actuator/health"
+    ;;
+  dev)
+    PROJECT_DIR="/srv/docker/tareas-app-api-dev"
+    BRANCH="develop"
+    COMPOSE_FILE="compose.dev.yaml"
+    LOCAL_HEALTH="http://127.0.0.1:8082/actuator/health"
+    PUBLIC_HEALTH="https://donit-api-dev.marfern.dev/actuator/health"
+    ;;
+  *)
+    echo "DEPLOY_ENV debe ser dev o prod" >&2
+    exit 2
+    ;;
+esac
+
+ARTIFACTS=("${COMPOSE_FILE}" scripts/cd-deploy.sh scripts/cd-poll.sh scripts/backup-db.sh)
+if [[ "${DEPLOY_ENV}" == prod ]]; then
+  ARTIFACTS+=(scripts/monitor-health.sh)
+else
+  ARTIFACTS+=(scripts/monitor-health-dev.sh)
+fi
+
 ENV_FILE="${PROJECT_DIR}/.env"
 BACKUP_DIR="${PROJECT_DIR}/backups-antes-deploy"
 LOCKFILE="${PROJECT_DIR}/.cd-deploy.lock"
@@ -32,102 +40,112 @@ MARKER="${PROJECT_DIR}/.deployed-sha"
 FAILED_MARKER="${PROJECT_DIR}/.failed-sha"
 LOG_DIR="${PROJECT_DIR}/logs"
 LOG_FILE="${LOG_DIR}/cd-deploy.log"
-
-LOCAL_HEALTH="http://127.0.0.1:8080/actuator/health"
-PUBLIC_HEALTH="https://donit-api.marfern.dev/actuator/health"
-
-log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "${LOG_FILE}"; }
-
-usage() {
-  echo "Uso: $0 <sha-completo-40hex>" >&2
-  echo "  La imagen objetivo es ${IMAGE}:<sha12>" >&2
-  echo "  Reintento manual de un SHA fallido:" >&2
-  echo "    $0 \"\$(cat ${FAILED_MARKER})\"" >&2
-  exit 2
-}
-
-# ---- 1. Uso / validacion SHA -------------------------------------------
-target="${1:-}"
-if [[ ! "${target}" =~ ^[0-9a-f]{40}$ ]]; then
-  log "ERROR: SHA invalido (${target:-vacio})"
-  usage
-fi
-short="${target:0:12}"
-
 mkdir -p "${LOG_DIR}"
 
-# ---- 2. Lock exclusivo (anti-paralelo) -----------------------------------
+log() { printf '%s [%s] %s\n' "$(date -Is)" "${DEPLOY_ENV}" "$*" | tee -a "${LOG_FILE}"; }
+
+target="${1:-}"
+if [[ ! "${target}" =~ ^[0-9a-f]{40}$ ]]; then
+  log "ERROR: SHA invalido"
+  exit 2
+fi
+target_tag="${target}"
+
+cd "${PROJECT_DIR}"
 exec 9>"${LOCKFILE}"
 if ! flock -n 9; then
-  log "ESTADO=1 otro deploy en curso (flock ocupado)"
+  log "ESTADO=1 otro deploy en curso"
   exit 1
 fi
 
-# ---- 3. Sync seguro de compose.yaml + scripts/ desde origin/master --------
-# NO se usa git reset --hard ni git clean -fd. Se extraen SOLO los ficheros
-# que necesita el deploy (compose.yaml y scripts/) desde origin/master con
-# `git archive`, que nunca borra y no toca el indice.
-# NO se sobrescriben: .env, logs/, backups/, backups-antes-deploy/,
-# .deployed-sha, .failed-sha, .cd-deploy.lock, src/ ni ningun otro fichero.
-if ! git fetch origin master --quiet 2>>"${LOG_FILE}"; then
+if ! git fetch origin "${BRANCH}" --quiet 2>>"${LOG_FILE}"; then
   log "ESTADO=1 git fetch fallo"
   exit 1
 fi
-if ! git archive --format=tar origin/master compose.yaml scripts/ 2>>"${LOG_FILE}" \
-     | tar -x -C "${PROJECT_DIR}" 2>>"${LOG_FILE}"; then
-  log "ESTADO=1 sincronizacion de compose.yaml/scripts fallo"
-  exit 1
+if [[ "$(git cat-file -t "${target}" 2>>"${LOG_FILE}" || true)" != commit ]]; then
+  git fetch origin "${target}" --quiet 2>>"${LOG_FILE}" || true
 fi
-chmod +x "${PROJECT_DIR}"/scripts/*.sh 2>/dev/null || true
-log "sync: compose.yaml y scripts/ actualizados desde origin/master"
-
-# ---- 4. Re-check de imagen GHCR (sin descargar) ---------------------------
-if ! docker manifest inspect "${IMAGE}:${short}" >/dev/null 2>&1; then
-  log "ESTADO=1 imagen inexistente ${IMAGE}:${short}"
+if [[ "$(git cat-file -t "${target}" 2>>"${LOG_FILE}" || true)" != commit ]]; then
+  log "ERROR: SHA objetivo no es un commit local"
+  exit 2
+fi
+if ! docker manifest inspect "${IMAGE}:${target_tag}" >/dev/null 2>&1; then
+  log "ESTADO=1 imagen inexistente ${IMAGE}:${target_tag}"
   exit 1
 fi
 
-# ---- 5. Tag anterior + backup completo de .env -----------------------------
+sync_artifacts() {
+  local sha="$1" stage path
+  stage="$(mktemp -d "${PROJECT_DIR}/.cd-artifacts.XXXXXX")" || return 1
+  if ! git archive --format=tar "${sha}" -- "${ARTIFACTS[@]}" 2>>"${LOG_FILE}" \
+       | tar -x -C "${stage}" 2>>"${LOG_FILE}"; then
+    rm -rf -- "${stage}"
+    return 1
+  fi
+  for path in "${ARTIFACTS[@]:1}"; do
+    if ! chmod +x "${stage}/${path}" 2>>"${LOG_FILE}"; then
+      rm -rf -- "${stage}"
+      return 1
+    fi
+  done
+  if ! mkdir -p "${PROJECT_DIR}/scripts"; then
+    rm -rf -- "${stage}"
+    return 1
+  fi
+  for path in "${ARTIFACTS[@]}"; do
+    if ! mv -fT -- "${stage}/${path}" "${PROJECT_DIR}/${path}"; then
+      rm -rf -- "${stage}"
+      return 1
+    fi
+  done
+  rmdir "${stage}/scripts" "${stage}"
+}
+
 prev_tag="$(sed -n 's/^API_IMAGE_TAG=//p' "${ENV_FILE}" | tail -n1 | tr -d '\r' || true)"
-prev_short="${prev_tag:0:12}"
-if [[ -z "${prev_short}" && -f "${MARKER}" ]]; then
-  prev_short="$(head -c 12 "${MARKER}")"
+prev_sha="$(cat "${MARKER}" 2>/dev/null || true)"
+if ! sync_artifacts "${target}"; then
+  if [[ "${prev_sha}" =~ ^[0-9a-f]{40}$ && "${prev_tag}" == "${prev_sha}" ]] \
+     && [[ "$(git cat-file -t "${prev_sha}" 2>>"${LOG_FILE}" || true)" == commit ]] \
+     && sync_artifacts "${prev_sha}"; then
+    log "ESTADO=1 sincronizacion de ${target} fallo; artefactos anteriores restaurados"
+    exit 1
+  fi
+  rm -f "${MARKER}"
+  log "ESTADO=4 sincronizacion de ${target} fallo; version anterior no verificable"
+  exit 4
 fi
-# La imagen anterior se conserva localmente (no se elimina ninguna imagen).
 
 mkdir -p "${BACKUP_DIR}"
 backup_env="${BACKUP_DIR}/.env-$(date +%Y%m%d-%H%M%S).bak"
-if ! cp -a "${ENV_FILE}" "${backup_env}" 2>/dev/null; then
+if ! cp -a "${ENV_FILE}" "${backup_env}"; then
   log "ESTADO=1 no se pudo respaldar .env"
   exit 1
 fi
 chmod 600 "${backup_env}"
-log "backup .env -> ${backup_env}"
 
-# ---- 6. Actualizacion ATOMICA SOLO de API_IMAGE_TAG -------------------------
-awk -v t="${short}" '
-  /^API_IMAGE_TAG=/ { seen=1; print "API_IMAGE_TAG=" t; next }
-  { print }
-  END { if (!seen) print "API_IMAGE_TAG=" t }
-' "${ENV_FILE}" > "${ENV_FILE}.tmp" && mv "${ENV_FILE}.tmp" "${ENV_FILE}"
-chmod 600 "${ENV_FILE}"
-log "API_IMAGE_TAG=${short} (prev=${prev_short:-<sin previo conocido>})"
+tmp_env="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
+cleanup() { rm -f "${tmp_env}"; }
+trap cleanup EXIT
 
-# ---- 7. Pull + recreate SOLO api ---------------------------------------------
-if ! docker compose pull api; then
-  log "ESTADO=1 pull fallo de ${IMAGE}:${short}"
-  cp -a "${backup_env}" "${ENV_FILE}" && chmod 600 "${ENV_FILE}"
-  exit 1
-fi
+compose=(docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}")
+restore_env() {
+  local restored
+  restored="$(mktemp "${ENV_FILE}.restore.XXXXXX")" || return 1
+  if ! cp -a "${backup_env}" "${restored}" || ! chmod 600 "${restored}" || ! mv -f "${restored}" "${ENV_FILE}"; then
+    rm -f "${restored}"
+    return 1
+  fi
+}
 
-if ! docker compose up -d --no-deps api >>"${LOG_FILE}" 2>&1; then
-  log "ESTADO=1 docker compose up -d --no-deps api fallo"
-  cp -a "${backup_env}" "${ENV_FILE}" && chmod 600 "${ENV_FILE}"
-  exit 1
-fi
-log "api recreado con ${short}"
+write_marker() {
+  local marker="$1" sha="$2" tmp
+  tmp="$(mktemp "${marker}.tmp.XXXXXX")" || return 1
+  if ! printf '%s' "${sha}" > "${tmp}" || ! chmod 600 "${tmp}" || ! mv -f "${tmp}" "${marker}"; then
+    rm -f "${tmp}"
+    return 1
+  fi
+}
 
-# ---- 8. Health checks ---------------------------------------------------------
 check_health() {
   local url="$1" attempts="${2:-24}" delay="${3:-5}" resp
   for ((i = 1; i <= attempts; i++)); do
@@ -141,56 +159,92 @@ check_health() {
 }
 
 rollback() {
-  log "ROLLBACK: restaurando estado previo"
-  if [[ -n "${backup_env:-}" && -f "${backup_env}" ]]; then
-    cp -a "${backup_env}" "${ENV_FILE}" && chmod 600 "${ENV_FILE}"
-    log "restaurado .env desde ${backup_env}"
+  log "ROLLBACK aplicacion: restaurando .env anterior; no se revierte la DB"
+  if ! restore_env; then
+    log "ROLLBACK fallo: no se pudo restaurar .env"
+    return 1
   fi
-  if [[ -n "${prev_short:-}" ]] && ! grep -q '^API_IMAGE_TAG=' "${ENV_FILE}"; then
-    printf '\nAPI_IMAGE_TAG=%s\n' "${prev_short}" >>"${ENV_FILE}"
-    chmod 600 "${ENV_FILE}"
+  if [[ ! "${prev_sha}" =~ ^[0-9a-f]{40}$ || "${prev_tag}" != "${prev_sha}" ]]; then
+    log "ROLLBACK fallo: no hay SHA anterior valido y coincidente con .env (bootstrap o estado inconsistente)"
+    return 1
   fi
-  if [[ -z "${prev_short:-}" ]]; then
-    log "AVISO: no hay despliegue previo conocido; el rollback queda al tag por defecto (master). Accion manual recomendada."
+  if ! docker image inspect "${IMAGE}:${prev_sha}" >/dev/null 2>&1; then
+    log "ROLLBACK fallo: imagen anterior ${IMAGE}:${prev_sha} no disponible localmente"
+    return 1
   fi
-  docker compose up -d --no-deps api >/dev/null 2>&1 || true
-  sleep 15
+  if [[ "$(git cat-file -t "${prev_sha}" 2>>"${LOG_FILE}" || true)" != commit ]] \
+     || ! sync_artifacts "${prev_sha}"; then
+    log "ROLLBACK fallo: artefactos del commit anterior ${prev_sha} no disponibles"
+    return 1
+  fi
+  if ! "${compose[@]}" up -d --no-deps api >>"${LOG_FILE}" 2>&1; then
+    log "ROLLBACK fallo: compose up de la imagen anterior fallo"
+    return 1
+  fi
+  if ! sleep 15; then
+    log "ROLLBACK fallo: espera de arranque interrumpida"
+    return 1
+  fi
+  if ! check_health "${LOCAL_HEALTH}" 24 5 || ! check_health "${PUBLIC_HEALTH}" 12 10; then
+    log "ROLLBACK fallo: health de la imagen anterior fallo"
+    return 1
+  fi
+  write_marker "${MARKER}" "${prev_sha}"
 }
 
-fail_state() {
-  local st="$1"
-  shift
-  printf '%s' "${target}" >"${FAILED_MARKER}"
-  chmod 600 "${FAILED_MARKER}"
-  log "ESTADO=${st} $* — SHA registrado en ${FAILED_MARKER}"
-  exit "${st}"
+fail_with_rollback() {
+  local reason="$1" code=4
+  trap '' HUP INT TERM
+  trap - ERR
+  if rollback; then
+    code=3
+  else
+    # The previous SHA is no longer verified as the running healthy version.
+    if ! rm -f "${MARKER}"; then
+      log "ERROR: no se pudo invalidar .deployed-sha"
+    fi
+  fi
+  if ! write_marker "${FAILED_MARKER}" "${target}"; then
+    log "ERROR: no se pudo registrar .failed-sha"
+    code=4
+  fi
+  log "ESTADO=${code} ${reason}; rollback aplicacion $([[ ${code} -eq 3 ]] && printf OK || printf FALLO)"
+  exit "${code}"
 }
+
+trap 'fail_with_rollback "interrupcion"' HUP INT TERM
+trap 'fail_with_rollback "error inesperado"' ERR
+awk -v t="${target_tag}" '
+  /^API_IMAGE_TAG=/ { seen=1; print "API_IMAGE_TAG=" t; next }
+  { print }
+  END { if (!seen) print "API_IMAGE_TAG=" t }
+' "${ENV_FILE}" > "${tmp_env}"
+chmod 600 "${tmp_env}"
+mv "${tmp_env}" "${ENV_FILE}"
+log "imagen objetivo=${target_tag} anterior=${prev_tag:-desconocida}"
+if ! "${compose[@]}" pull api; then
+  if ! restore_env || [[ ! "${prev_sha}" =~ ^[0-9a-f]{40}$ ]] || [[ "${prev_tag}" != "${prev_sha}" ]] \
+     || [[ "$(git cat-file -t "${prev_sha}" 2>>"${LOG_FILE}" || true)" != commit ]] \
+     || ! sync_artifacts "${prev_sha}"; then
+    rm -f "${MARKER}"
+    log "ESTADO=4 pull fallo y no se pudo restaurar la version anterior"
+    exit 4
+  fi
+  log "ESTADO=1 pull fallo"
+  exit 1
+fi
+if ! "${compose[@]}" up -d --no-deps api >>"${LOG_FILE}" 2>&1; then
+  fail_with_rollback "compose up fallo"
+fi
 
 if ! check_health "${LOCAL_HEALTH}" 30 5; then
-  log "FALLO health local"
-  rollback
-  if check_health "${LOCAL_HEALTH}" 24 5; then
-    fail_state 3 "deploy falla, rollback OK (health local UP)"
-  else
-    fail_state 4 "CRITICO: rollback FALLIDO, health local DOWN"
-  fi
+  fail_with_rollback "health local fallo"
 fi
-log "health local OK"
-
 if ! check_health "${PUBLIC_HEALTH}" 12 10; then
-  log "FALLO health publico"
-  rollback
-  if check_health "${PUBLIC_HEALTH}" 12 10 && check_health "${LOCAL_HEALTH}" 12 5; then
-    fail_state 3 "deploy falla, rollback OK (health publico UP)"
-  else
-    fail_state 4 "CRITICO: rollback FALLIDO"
-  fi
+  fail_with_rollback "health publico fallo"
 fi
-log "health publico OK"
 
-# ---- 9. Exito -----------------------------------------------------------------
-printf '%s' "${target}" >"${MARKER}"
-chmod 600 "${MARKER}"
+write_marker "${MARKER}" "${target}"
+trap - HUP INT TERM ERR
 rm -f "${FAILED_MARKER}"
-log "ESTADO=0 DEPLOY OK sha=${target} (tag ${short})"
-exit 0
+log "ESTADO=0 DEPLOY OK sha=${target} tag=${target_tag}"

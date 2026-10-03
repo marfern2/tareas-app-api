@@ -17,6 +17,8 @@ dependency-check-data/
 .env
 .env.*
 !.env.example
+!.env.local.example
+!.env.dev.example
 logs/
 *.log
 backups/
