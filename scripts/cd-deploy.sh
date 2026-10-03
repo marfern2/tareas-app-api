@@ -26,6 +26,13 @@ case "${DEPLOY_ENV}" in
     ;;
 esac
 
+ARTIFACTS=("${COMPOSE_FILE}" scripts/cd-deploy.sh scripts/cd-poll.sh scripts/backup-db.sh)
+if [[ "${DEPLOY_ENV}" == prod ]]; then
+  ARTIFACTS+=(scripts/monitor-health.sh)
+else
+  ARTIFACTS+=(scripts/monitor-health-dev.sh)
+fi
+
 ENV_FILE="${PROJECT_DIR}/.env"
 BACKUP_DIR="${PROJECT_DIR}/backups-antes-deploy"
 LOCKFILE="${PROJECT_DIR}/.cd-deploy.lock"
@@ -55,20 +62,59 @@ if ! git fetch origin "${BRANCH}" --quiet 2>>"${LOG_FILE}"; then
   log "ESTADO=1 git fetch fallo"
   exit 1
 fi
-if ! git archive --format=tar "origin/${BRANCH}" "${COMPOSE_FILE}" scripts/ 2>>"${LOG_FILE}" \
-     | tar -x -C "${PROJECT_DIR}" 2>>"${LOG_FILE}"; then
-  log "ESTADO=1 sincronizacion de ${COMPOSE_FILE}/scripts fallo"
-  exit 1
+if [[ "$(git cat-file -t "${target}" 2>>"${LOG_FILE}" || true)" != commit ]]; then
+  git fetch origin "${target}" --quiet 2>>"${LOG_FILE}" || true
 fi
-chmod +x "${PROJECT_DIR}"/scripts/*.sh 2>/dev/null || true
-
+if [[ "$(git cat-file -t "${target}" 2>>"${LOG_FILE}" || true)" != commit ]]; then
+  log "ERROR: SHA objetivo no es un commit local"
+  exit 2
+fi
 if ! docker manifest inspect "${IMAGE}:${target_tag}" >/dev/null 2>&1; then
   log "ESTADO=1 imagen inexistente ${IMAGE}:${target_tag}"
   exit 1
 fi
 
+sync_artifacts() {
+  local sha="$1" stage path
+  stage="$(mktemp -d "${PROJECT_DIR}/.cd-artifacts.XXXXXX")" || return 1
+  if ! git archive --format=tar "${sha}" -- "${ARTIFACTS[@]}" 2>>"${LOG_FILE}" \
+       | tar -x -C "${stage}" 2>>"${LOG_FILE}"; then
+    rm -rf -- "${stage}"
+    return 1
+  fi
+  for path in "${ARTIFACTS[@]:1}"; do
+    if ! chmod +x "${stage}/${path}" 2>>"${LOG_FILE}"; then
+      rm -rf -- "${stage}"
+      return 1
+    fi
+  done
+  if ! mkdir -p "${PROJECT_DIR}/scripts"; then
+    rm -rf -- "${stage}"
+    return 1
+  fi
+  for path in "${ARTIFACTS[@]}"; do
+    if ! mv -fT -- "${stage}/${path}" "${PROJECT_DIR}/${path}"; then
+      rm -rf -- "${stage}"
+      return 1
+    fi
+  done
+  rmdir "${stage}/scripts" "${stage}"
+}
+
 prev_tag="$(sed -n 's/^API_IMAGE_TAG=//p' "${ENV_FILE}" | tail -n1 | tr -d '\r' || true)"
 prev_sha="$(cat "${MARKER}" 2>/dev/null || true)"
+if ! sync_artifacts "${target}"; then
+  if [[ "${prev_sha}" =~ ^[0-9a-f]{40}$ && "${prev_tag}" == "${prev_sha}" ]] \
+     && [[ "$(git cat-file -t "${prev_sha}" 2>>"${LOG_FILE}" || true)" == commit ]] \
+     && sync_artifacts "${prev_sha}"; then
+    log "ESTADO=1 sincronizacion de ${target} fallo; artefactos anteriores restaurados"
+    exit 1
+  fi
+  rm -f "${MARKER}"
+  log "ESTADO=4 sincronizacion de ${target} fallo; version anterior no verificable"
+  exit 4
+fi
+
 mkdir -p "${BACKUP_DIR}"
 backup_env="${BACKUP_DIR}/.env-$(date +%Y%m%d-%H%M%S).bak"
 if ! cp -a "${ENV_FILE}" "${backup_env}"; then
@@ -126,6 +172,11 @@ rollback() {
     log "ROLLBACK fallo: imagen anterior ${IMAGE}:${prev_sha} no disponible localmente"
     return 1
   fi
+  if [[ "$(git cat-file -t "${prev_sha}" 2>>"${LOG_FILE}" || true)" != commit ]] \
+     || ! sync_artifacts "${prev_sha}"; then
+    log "ROLLBACK fallo: artefactos del commit anterior ${prev_sha} no disponibles"
+    return 1
+  fi
   if ! "${compose[@]}" up -d --no-deps api >>"${LOG_FILE}" 2>&1; then
     log "ROLLBACK fallo: compose up de la imagen anterior fallo"
     return 1
@@ -172,8 +223,11 @@ chmod 600 "${tmp_env}"
 mv "${tmp_env}" "${ENV_FILE}"
 log "imagen objetivo=${target_tag} anterior=${prev_tag:-desconocida}"
 if ! "${compose[@]}" pull api; then
-  if ! restore_env; then
-    log "ESTADO=4 pull fallo y no se pudo restaurar .env"
+  if ! restore_env || [[ ! "${prev_sha}" =~ ^[0-9a-f]{40}$ ]] || [[ "${prev_tag}" != "${prev_sha}" ]] \
+     || [[ "$(git cat-file -t "${prev_sha}" 2>>"${LOG_FILE}" || true)" != commit ]] \
+     || ! sync_artifacts "${prev_sha}"; then
+    rm -f "${MARKER}"
+    log "ESTADO=4 pull fallo y no se pudo restaurar la version anterior"
     exit 4
   fi
   log "ESTADO=1 pull fallo"

@@ -7,14 +7,57 @@ work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
 old_sha="$(printf 'a%.0s' {1..40})"
 new_sha="$(printf 'b%.0s' {1..40})"
+branch_sha="$(printf 'c%.0s' {1..40})"
 mkdir -p "${work}/bin"
+
+for sha in "${old_sha}" "${new_sha}" "${branch_sha}"; do
+  mkdir -p "${work}/fixtures/${sha}/scripts"
+  printf 'compose from %s\n' "${sha}" > "${work}/fixtures/${sha}/compose.dev.yaml"
+  for script in cd-deploy.sh cd-poll.sh backup-db.sh monitor-health-dev.sh; do
+    printf 'script %s from %s\n' "${script}" "${sha}" > "${work}/fixtures/${sha}/scripts/${script}"
+  done
+  printf 'unrelated\n' > "${work}/fixtures/${sha}/scripts/deploy.sh"
+done
 
 cat > "${work}/bin/git" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 case "$1" in
-  fetch) exit 0 ;;
-  archive) tar -cf - --files-from /dev/null ;;
+  ls-remote) printf '%s\trefs/heads/develop\n' "$MOCK_NEW_SHA" ;;
+  fetch)
+    [[ "$2" == origin ]] || exit 90
+    if [[ "$3" == develop ]]; then
+      if [[ "${MOCK_ADVANCE:-0}" == 1 ]]; then
+        printf '%s' "$MOCK_BRANCH_SHA" > "${MOCK_PROJECT}/branch-tip"
+      fi
+    elif [[ "$3" == "$MOCK_NEW_SHA" ]]; then
+      touch "${MOCK_PROJECT}/target-fetched"
+    else
+      exit 90
+    fi ;;
+  cat-file)
+    [[ "$2" == -t ]] || exit 90
+    if [[ "$3" == "$MOCK_NEW_SHA" && "${MOCK_REQUIRE_EXACT_FETCH:-0}" == 1 \
+       && ! -e "${MOCK_PROJECT}/target-fetched" ]]; then
+      exit 1
+    fi
+    if [[ "$3" == "$MOCK_OLD_SHA" && -e "${MOCK_PROJECT}/missing-old-commit" ]]; then
+      exit 1
+    fi
+    case "$3" in
+      "$MOCK_OLD_SHA"|"$MOCK_NEW_SHA"|"$MOCK_BRANCH_SHA") printf 'commit\n' ;;
+      *) exit 1 ;;
+    esac ;;
+  archive)
+    [[ "$2" == --format=tar ]] || exit 90
+    sha="$3"
+    if [[ "$sha" == origin/develop ]]; then
+      sha="$(cat "${MOCK_PROJECT}/branch-tip")"
+    fi
+    [[ -d "${MOCK_FIXTURES}/${sha}" ]] || exit 1
+    shift 3
+    [[ "${1:-}" == -- ]] && shift
+    tar -C "${MOCK_FIXTURES}/${sha}" -cf - "$@" ;;
   *) exit 90 ;;
 esac
 MOCK
@@ -84,15 +127,17 @@ prepare() {
   cp "${project}/.env" "${project}/original-env"
   printf '%s' "$old_sha" > "${project}/.deployed-sha"
   printf 'old' > "${project}/running"
+  printf '%s' "$new_sha" > "${project}/branch-tip"
   sed "s|PROJECT_DIR=\"/srv/docker/tareas-app-api-dev\"|PROJECT_DIR=\"${project}\"|" \
     "${root}/scripts/cd-deploy.sh" > "${project}/cd-deploy-under-test.sh"
 }
 
 run_deploy() {
-  local expected="$1" actual
+  local expected="$1" target="${2:-${new_sha}}" actual
   actual=0
   env DEPLOY_ENV=dev MOCK_PROJECT="${project}" MOCK_OLD_SHA="${old_sha}" MOCK_NEW_SHA="${new_sha}" \
-    PATH="${work}/bin:${PATH}" bash "${project}/cd-deploy-under-test.sh" "$new_sha" \
+    MOCK_BRANCH_SHA="${branch_sha}" MOCK_FIXTURES="${work}/fixtures" MOCK_ADVANCE="${MOCK_ADVANCE:-0}" \
+    PATH="${work}/bin:${PATH}" bash "${project}/cd-deploy-under-test.sh" "$target" \
     > "${project}/output" 2>&1 || actual=$?
   [[ "$actual" == "$expected" ]] || { cat "${project}/output" >&2; fail "exit ${actual}, esperado ${expected}"; }
   cmp -s "${project}/original-env" "${project}/.env" || fail ".env o secretos cambiaron"
@@ -169,6 +214,7 @@ touch "${project}/pull-fails"
 run_deploy 1
 assert_file "${project}/running" old
 assert_file "${project}/.deployed-sha" "$old_sha"
+assert_file "${project}/compose.dev.yaml" "compose from ${old_sha}"
 assert_missing "${project}/.failed-sha"
 [[ "$(cat "${project}/docker-calls")" == "pull ${new_sha}" ]] || fail "pull fallo y se intento up"
 printf 'PASS: pull fallido conserva despliegue y permite reintento\n'
@@ -184,6 +230,7 @@ printf 'PASS: interrupcion tras reemplazo parcial ejecuta rollback\n'
 prepare success
 actual=0
 env DEPLOY_ENV=dev MOCK_PROJECT="${project}" MOCK_OLD_SHA="${old_sha}" MOCK_NEW_SHA="${new_sha}" \
+  MOCK_BRANCH_SHA="${branch_sha}" MOCK_FIXTURES="${work}/fixtures" \
   PATH="${work}/bin:${PATH}" bash "${project}/cd-deploy-under-test.sh" "$new_sha" \
   > "${project}/output" 2>&1 || actual=$?
 [[ "$actual" == 0 ]] || { cat "${project}/output" >&2; fail "deploy sano exit ${actual}"; }
@@ -191,3 +238,54 @@ assert_file "${project}/.deployed-sha" "$new_sha"
 assert_missing "${project}/.failed-sha"
 assert_file "${project}/running" new
 printf 'PASS: deploy sano escribe SHA nuevo solo tras health\n'
+
+prepare branch_race
+mkdir -p "${project}/scripts"
+cp "${project}/cd-deploy-under-test.sh" "${project}/scripts/cd-deploy.sh"
+chmod +x "${project}/scripts/cd-deploy.sh"
+sed "s|PROJECT_DIR=\"/srv/docker/tareas-app-api-dev\"|PROJECT_DIR=\"${project}\"|" \
+  "${root}/scripts/cd-poll.sh" > "${project}/scripts/cd-poll.sh"
+actual=0
+(
+  cd "${project}"
+  env DEPLOY_ENV=dev MOCK_PROJECT="${project}" MOCK_OLD_SHA="${old_sha}" MOCK_NEW_SHA="${new_sha}" \
+    MOCK_BRANCH_SHA="${branch_sha}" MOCK_FIXTURES="${work}/fixtures" MOCK_ADVANCE=1 \
+    MOCK_REQUIRE_EXACT_FETCH=1 \
+    PATH="${work}/bin:${PATH}" bash ./scripts/cd-poll.sh
+) > "${project}/output" 2>&1 || actual=$?
+[[ "$actual" == 0 ]] || { cat "${project}/output" >&2; fail "poller/deploy exit ${actual}"; }
+assert_file "${project}/branch-tip" "$branch_sha"
+[[ -e "${project}/target-fetched" ]] || fail "SHA A no se obtuvo tras avance de rama"
+assert_file "${project}/.deployed-sha" "$new_sha"
+assert_file "${project}/compose.dev.yaml" "compose from ${new_sha}"
+for script in cd-deploy.sh cd-poll.sh backup-db.sh monitor-health-dev.sh; do
+  assert_file "${project}/scripts/${script}" "script ${script} from ${new_sha}"
+done
+assert_missing "${project}/scripts/deploy.sh"
+[[ "$(cat "${project}/docker-calls")" == "$(printf 'pull %s\nup %s' "$new_sha" "$new_sha")" ]] || fail "imagen no corresponde al SHA del poller"
+printf 'PASS: poller selecciona A, rama avanza a B y todos los artefactos e imagen siguen en A\n'
+
+prepare rollback_artifacts
+touch "${project}/new-up-fails"
+MOCK_ADVANCE=1 run_deploy 3
+assert_file "${project}/compose.dev.yaml" "compose from ${old_sha}"
+for script in cd-deploy.sh cd-poll.sh backup-db.sh monitor-health-dev.sh; do
+  assert_file "${project}/scripts/${script}" "script ${script} from ${old_sha}"
+done
+assert_file "${project}/.deployed-sha" "$old_sha"
+printf 'PASS: rollback restaura compose y scripts del SHA anterior exacto\n'
+
+prepare rollback_missing_commit
+touch "${project}/new-up-fails" "${project}/missing-old-commit"
+run_deploy 4
+assert_missing "${project}/.deployed-sha"
+assert_file "${project}/.failed-sha" "$new_sha"
+printf 'PASS: rollback sin commit anterior verificable invalida marcador y devuelve exit 4\n'
+
+prepare invalid_sha
+run_deploy 2 'origin/develop'
+assert_missing "${project}/compose.dev.yaml"
+run_deploy 2 "$(printf 'd%.0s' {1..40})"
+assert_missing "${project}/compose.dev.yaml"
+assert_file "${project}/.deployed-sha" "$old_sha"
+printf 'PASS: ref arbitraria y commit inexistente se rechazan antes de sincronizar\n'
