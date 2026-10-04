@@ -57,6 +57,9 @@ class AdminAuthIntegrationTest {
     @Autowired
     private JwtService normalJwtService;
 
+    @Value("${jwt.secret}")
+    private String normalJwtSecret;
+
     @Value("${jwt.admin.secret}")
     private String adminJwtSecret;
 
@@ -373,8 +376,7 @@ class AdminAuthIntegrationTest {
         crearAdmin(email);
 
         // Crear token usando el secret NORMAL (Android)
-        String normalSecret = "dGFyZWFzLWFwcC10ZXN0LXNlY3JldC1nZW5lcmljby0yMDI2LXBhcmEtdGVzdHMtdW5pdGFyaW9z";
-        SecretKey normalKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(normalSecret));
+        SecretKey normalKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(normalJwtSecret));
 
         String forgedToken = Jwts.builder()
                 .subject(email)
