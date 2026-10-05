@@ -1,5 +1,7 @@
 # Activación final de DEV en marserver
 
+> Guía histórica de puesta en marcha. DEV, sus hostnames y el CD ya están operativos. Para el funcionamiento actual, consultar [CD-DEPLOY.md](CD-DEPLOY.md) y [ENTORNOS.md](ENTORNOS.md).
+
 El bootstrap puede ejecutar imágenes construidas localmente para revisión. El CD no debe activarse hasta que los cambios estén en `develop`, GHCR contenga el tag inmutable `<sha40>` y Cloudflare resuelva ambos hostnames.
 
 ## Cloudflare Dashboard
