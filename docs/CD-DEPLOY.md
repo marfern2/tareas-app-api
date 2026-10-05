@@ -1,10 +1,9 @@
 # CD — Continuous Deployment de tareas-app-api
 
-El mismo script opera en dos contextos cerrados mediante `DEPLOY_ENV`. PROD
-mantiene su timer actual; DEV se activa solo después de publicar la rama
-`develop`, la imagen GHCR y los hostnames Cloudflare.
+El mismo script opera en dos contextos separados mediante `DEPLOY_ENV`.
+Los pollers systemd de DEV y PROD están operativos.
 
-## Flujo automático (cuando el timer esté activado)
+## Flujo automático actual
 
 ```
 feature/* -> PR develop -> security-scan -> merge
@@ -66,10 +65,7 @@ cat .deployed-sha
 # Volver a un SHA anterior ya publicado (imagen conservada localmente)
 DEPLOY_ENV=prod ./scripts/cd-deploy.sh <sha-completo-40hex>
 
-# Equivalente manual sin el script:
-#   cp backups-antes-deploy/.env-<ts>.bak .env && chmod 600 .env
-#   docker compose up -d --no-deps api
-#   curl -fsS http://127.0.0.1:8080/actuator/health
+# El script sincroniza imagen y artefactos del SHA solicitado y valida la salud.
 ```
 
 ## Reintento manual de un SHA fallido
@@ -89,7 +85,7 @@ DEPLOY_ENV=prod ./scripts/cd-deploy.sh "$(git rev-parse origin/master)"
 
 ```bash
 tail -n 50 /srv/docker/tareas-app-api/logs/cd-deploy.log
-journalctl --user -u tareas-app-cd.service -n 50        # cuando exista el timer
+journalctl --user -u tareas-app-cd.service -n 50
 ```
 
 ## Sincronización de ficheros en el servidor
