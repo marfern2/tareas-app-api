@@ -1,7 +1,8 @@
 # Cloudflare Tunnel — cloudflared
 
-Configuración versionada del túnel Cloudflare que publica la API en
-`https://donit-api.marfern.dev/`.
+Configuración versionada del túnel Cloudflare. El túnel publica la API PROD en
+`https://donit-api.marfern.dev/` y la API DEV en
+`https://donit-api-dev.marfern.dev/` mediante hostnames gestionados remotamente.
 
 La configuración de producción vive en `/srv/docker/cloudflare-tunnel/` en
 marserver. Este directorio es la fuente versionada de la misma.
@@ -11,7 +12,8 @@ marserver. Este directorio es la fuente versionada de la misma.
 - Servicio `cloudflared` corriendo en Docker con `network_mode: host`.
 - `container_name: cloudflared`, `restart: unless-stopped`.
 - Ingress remoto (gestionado desde Cloudflare Dashboard por token):
-  `donit-api.marfern.dev -> http://localhost:8080`.
+  `donit-api.marfern.dev -> http://localhost:8080` y
+  `donit-api-dev.marfern.dev -> http://localhost:8082`.
 
 ## Secretos
 

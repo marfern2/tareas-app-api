@@ -1,426 +1,57 @@
-# Tareas App API
+# Donit — API
 
-API REST desarrollada con Java y Spring Boot para la gestión de tareas.
+Donit es una aplicación de gestión de tareas formada por esta API Spring Boot, un panel de administración Angular y una aplicación Android Kotlin/Compose. Este repositorio concentra los datos, las reglas de acceso y los endpoints para usuarios y administradores.
 
-Está pensada para ser consumida desde una aplicación Android y otros clientes frontend.
+## Stack y arquitectura
 
----
+- Java 21, Spring Boot, Spring Security, JPA, PostgreSQL y Flyway.
+- JWT de acceso y refresh tokens; autenticación de usuarios y de administradores separadas.
+- Docker Compose para API y PostgreSQL, imágenes en GHCR y Cloudflare Tunnel para las URLs públicas.
+- Spring Boot Actuator en `/actuator/health`; OpenAPI/Swagger cuando se habilita.
 
-## Tecnologías utilizadas
+La API permite registro, login, perfil y gestión de tareas y tipos de tarea. El panel administra usuarios, tareas y tipos de tarea. Android usa la API de su propio entorno. La base de datos y los secretos pertenecen a cada entorno; Flyway aplica las migraciones al arrancar.
 
-- Java 21
-- Spring Boot
-- Spring Web
-- Spring Data JPA
-- Spring Security
-- JWT
-- PostgreSQL
-- H2 Database
-- Swagger / OpenAPI
-- Spring Boot Actuator
-- Lombok
-- Gradle
-- Docker
-- Docker Compose
+## Entornos
 
----
+| Entorno | API pública o local | Admin | Puerto API en el host |
+|---|---|---|---|
+| LOCAL | `http://localhost:8080` | `http://localhost:4200` | `127.0.0.1:8080` |
+| DEV | `https://donit-api-dev.marfern.dev` | `https://admin-dev.marfern.dev` | `127.0.0.1:8082` |
+| PROD | `https://donit-api.marfern.dev` | `https://admin-donit.marfern.dev` | `127.0.0.1:8080` |
 
-## Funcionalidades principales
+DEV y PROD tienen contenedores, PostgreSQL, redes, volúmenes y secretos separados. Las URLs públicas llegan a los puertos locales mediante Cloudflare Tunnel. Consulta [entornos](docs/ENTORNOS.md) y la [configuración del túnel](infra/cloudflare-tunnel/README.md).
 
-- Registro e inicio de sesión de usuarios
-- Autenticación mediante JWT
-- Gestión de tareas
-- Gestión de tipos de tarea
-- Validación de datos
-- Documentación de endpoints con Swagger
-- Persistencia de datos con JPA
-- Configuración separada para LOCAL, DEV y producción
-- Despliegue mediante Docker Compose
-- Healthcheck mediante Spring Boot Actuator
-- Copias de seguridad de PostgreSQL
+## Ejecución local
 
----
-
-## Ejecución local sin Docker
-
-### 1. Clonar el repositorio
+Se necesita Docker Engine/Desktop con Compose v2. Desde la raíz del repositorio:
 
 ```bash
-git clone https://github.com/ZhakiiTw/tareas-app-api.git
+cp .env.local.example .env.local
+# Sustituir todos los valores de ejemplo por secretos locales propios.
+docker compose -f compose.local.yaml --env-file .env.local up --build
+curl -fsS http://127.0.0.1:8080/actuator/health
 ```
 
-### 2. Entrar en el proyecto
+La API local escucha en `127.0.0.1:8080` y PostgreSQL local en `127.0.0.1:5432`. `.env.local` está ignorado por Git y excluido del contexto Docker. Swagger, si se habilita, está en `/swagger-ui/index.html`.
+
+## Tests
 
 ```bash
-cd tareas-app-api
+./gradlew test
 ```
 
-### 3. Ejecutar la aplicación
+El workflow de publicación ejecuta tests y un control de dependencias antes de construir la imagen. Los tests usan una clave JWT exclusiva de test.
 
-En Linux o macOS:
+## CI/CD y despliegue
 
-```bash
-export JWT_SECRET=$(openssl rand -base64 64)
-./gradlew bootRun
-```
+`feature/*` se integra en `develop` para DEV; después de validar se promueve `develop` a `master` para PROD. GitHub Actions publica `ghcr.io/marfern2/tareas-app-api:<SHA40>`; los aliases de rama no identifican el despliegue. Pollers systemd seleccionan el SHA de la rama, y el deploy sincroniza imagen y artefactos operativos del mismo commit. Tras comprobar salud local y pública escribe `.deployed-sha`; un candidato fallido queda en `.failed-sha`.
 
-En Windows:
-
-```powershell
-set JWT_SECRET=<valor_base64_generado>
-.\gradlew.bat bootRun
-```
-
-El secreto JWT nunca debe ir hardcodeado en el código ni subirse al repositorio. En local se genera al vuelo; en producción se inyecta desde `.env`.
-
----
-
-## Swagger
-
-Cuando Swagger está habilitado y la API se encuentra iniciada:
-
-```text
-http://localhost:8080/swagger-ui/index.html
-```
-
-Swagger puede habilitarse o deshabilitarse mediante la variable de entorno `SWAGGER_ENABLED`.
-En producción está deshabilitado por defecto (`SWAGGER_ENABLED=false`).
-
----
-
-## Endpoints principales
-
-### Autenticación
-
-```http
-POST /auth/registro
-POST /auth/login
-```
-
-### Tareas
-
-```http
-GET /tareas
-POST /tareas
-PATCH /tareas/{id}
-PATCH /tareas/{id}/completar
-PATCH /tareas/{id}/reabrir
-DELETE /tareas/{id}
-```
-
-### Tipos de tarea
-
-```http
-GET /tipos-tarea
-POST /tipos-tarea
-PATCH /tipos-tarea/{id}
-DELETE /tipos-tarea/{id}
-```
-
-### Usuario autenticado
-
-```http
-GET /usuarios/me
-```
-
----
+El rollback usa imagen y artefactos del SHA anterior. Flyway **no** revierte automáticamente migraciones ya aplicadas. Hay copias de seguridad de PostgreSQL independientes para DEV y PROD. Procedimientos: [CD y rollback](docs/CD-DEPLOY.md), [backups y recuperación PROD](docs/RECUPERACION-BACKUPS.md).
 
 ## Seguridad
 
-La API utiliza autenticación mediante JWT.
+Las contraseñas se almacenan con BCrypt. La API valida firma, emisor, audiencia y caducidad de JWT; usa secretos distintos para usuario y administrador, y separados entre DEV y PROD. Las rutas protegidas requieren `Authorization: Bearer <token>`. CORS se limita a los orígenes configurados, y el endpoint de salud no revela detalles internos. No versionar `.env` ni secretos.
 
-El token debe enviarse en la cabecera de las peticiones protegidas:
+## Estado
 
-```http
-Authorization: Bearer <token>
-```
-
-No deben subirse al repositorio contraseñas, secretos JWT ni archivos `.env`.
-
-### Medidas implementadas
-
-- Contraseñas cifradas con BCrypt.
-- JWT con firma HS256/384, con `iss`, `aud`, `sub` y `exp` validados.
-- Endpoints protegidos por defecto; solo `login`, `registro`, `health` y (si se habilita) Swagger son públicos.
-- Peticiones no autenticadas responden `401`; tokens inválidos o expirados también `401`.
-- Errores controlados: `400`, `401`, `403`, `404`, `405`, `409`, `429`, `500` sin stack traces ni mensajes internos.
-- Rate limiting en memoria (Bucket4j): 5 intentos/minuto/IP en `login`, 3/hora/IP en `registro` y 120 peticiones/minuto por usuario en el resto de la API.
-- Autorización por propietario: ninguna operación permite acceder a tareas o tipos de tarea de otro usuario.
-- CORS restringido a orígenes configurados, sin `*` con credenciales.
-- Actuator expone únicamente `health` sin detalles.
-
----
-
-## Entornos y bases de datos
-
-La aplicación puede utilizar:
-
-- H2 para tests rápidos sin perfil
-- PostgreSQL independiente para LOCAL, DEV y PROD
-
-En el despliegue Docker, PostgreSQL se ejecuta en un contenedor independiente y no publica su puerto `5432` hacia el host.
-
-La matriz completa, comandos, tags, seed y limitaciones de rollback están en [docs/ENTORNOS.md](docs/ENTORNOS.md).
-
----
-
-# Despliegue con Docker
-
-## Requisitos
-
-- Git
-- Docker Engine o Docker Desktop
-- Docker Compose v2, disponible mediante `docker compose`
-
-En un servidor Ubuntu solo es necesario instalar Git y Docker. Java y PostgreSQL se ejecutan dentro de los contenedores.
-
----
-
-## Preparar las variables de entorno
-
-El repositorio incluye el archivo `.env.example` como plantilla.
-
-Crea el archivo real:
-
-```bash
-cp .env.example .env
-```
-
-El archivo `.env` está ignorado por Git y no debe subirse al repositorio.
-
-Genera una contraseña segura para PostgreSQL:
-
-```bash
-openssl rand -base64 32
-```
-
-Genera un secreto JWT en Base64:
-
-```bash
-openssl rand -base64 64
-```
-
-Edita el archivo:
-
-```bash
-nano .env
-```
-
-Sustituye todos los valores que comiencen por:
-
-```text
-CAMBIAR_POR_
-```
-
-Para un primer despliegue dentro de una red local pueden mantenerse valores similares a estos:
-
-```dotenv
-API_PORT=8080
-CORS_ALLOWED_ORIGINS=http://localhost:8080
-SWAGGER_ENABLED=false
-```
-
-El puerto `8080` publicado en el servidor es una configuración inicial. En producción, la API debería situarse detrás de un reverse proxy con HTTPS.
-
----
-
-## Validar la configuración
-
-Antes de levantar los contenedores:
-
-```bash
-docker compose config
-```
-
-Este comando permite detectar variables ausentes o errores de sintaxis en `compose.yaml`.
-
----
-
-## Construir y levantar los servicios
-
-```bash
-docker compose up -d --build
-```
-
-También se puede utilizar:
-
-```bash
-make deploy
-```
-
-Docker Compose levantará:
-
-- La API Spring Boot con el perfil `prod`
-- PostgreSQL
-- La red interna entre ambos servicios
-- El volumen persistente de la base de datos
-
----
-
-## Comprobar el estado
-
-```bash
-docker compose ps
-```
-
-Consultar el healthcheck de la API:
-
-```bash
-curl -fsS http://localhost:${API_PORT:-8080}/actuator/health
-```
-
-También puede utilizarse:
-
-```bash
-make status
-```
-
-Una respuesta correcta será similar a:
-
-```json
-{
-  "status": "UP"
-}
-```
-
-El endpoint público de salud no muestra detalles internos de la aplicación.
-
----
-
-## Consultar logs
-
-```bash
-docker compose logs -f api
-```
-
-O mediante:
-
-```bash
-make logs
-```
-
-En producción, la aplicación escribe los logs en la salida estándar del contenedor. Docker se encarga de la rotación configurada en Compose.
-
----
-
-## Detener los servicios
-
-```bash
-docker compose down
-```
-
-O:
-
-```bash
-make down
-```
-
-No utilices:
-
-```bash
-docker compose down -v
-```
-
-salvo que quieras eliminar también el volumen persistente y todos los datos de PostgreSQL.
-
----
-
-## Actualizar la aplicación desde Git
-
-```bash
-git pull
-docker compose up -d --build
-docker compose ps
-```
-
-También puede utilizarse:
-
-```bash
-git pull
-make deploy
-```
-
----
-
-## Backup de PostgreSQL
-
-Ejecuta:
-
-```bash
-make backup
-```
-
-Los archivos se guardan en el servidor, fuera del repositorio:
-
-```text
-/srv/docker/backups/tareas-app-postgres/
-```
-
-Formato `pg_dump --format=custom` (`.dump`). Cada backup incluye la fecha y la hora en su nombre, se valida con `pg_restore --list` y se conservan los últimos 14 días. Guía completa en `docs/RECUPERACION-BACKUPS.md`.
-
----
-
-## Restaurar PostgreSQL
-
-Para evitar escrituras durante la restauración, detén primero la API:
-
-```bash
-docker compose stop api
-```
-
-Restaura el archivo deseado (los `.dump` están en `/srv/docker/backups/tareas-app-postgres/`):
-
-```bash
-docker cp /srv/docker/backups/tareas-app-postgres/tareas-app-YYYYMMDD-HHMMSS.dump \
-  tareas-postgres:/tmp/restore.dump
-docker exec tareas-postgres sh -c \
-  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-   --no-owner --no-privileges --exit-on-error /tmp/restore.dump'
-```
-
-La guía de recuperación completa está en `docs/RECUPERACION-BACKUPS.md`.
-
-Vuelve a levantar la API:
-
-```bash
-docker compose up -d api
-```
-
-Comprueba finalmente el estado:
-
-```bash
-make status
-```
-
----
-
-## Estructura relacionada con el despliegue
-
-```text
-tareas-app-api/
-├── Dockerfile
-├── compose.yaml
-├── .dockerignore
-├── .env.example
-├── Makefile
-├── scripts/
-│   ├── deploy.sh
-│   ├── logs.sh
-│   ├── status.sh
-│   └── backup-db.sh
-├── src/
-├── build.gradle
-└── README.md
-```
-
----
-
-## Autor
-
-Marcos Fernández
-
----
-
-## Estado del proyecto
-
-Proyecto en desarrollo.
+Backend DEV y PROD operativos; CD de ambos entornos operativo. La aplicación Android y el panel Admin también tienen entornos DEV y PROD separados.

@@ -8,7 +8,9 @@
 | DEV | `dev` | `https://donit-api-dev.marfern.dev` | `https://admin-dev.marfern.dev` | volumen `tareas-postgres-dev-data` | `<sha40>` |
 | PROD | `prod` | `https://donit-api.marfern.dev` | `https://admin-donit.marfern.dev` | volumen `tareas-postgres-data` | `<sha40>` |
 
-Cada entorno usa `.env`, credenciales DB y secretos JWT propios. PostgreSQL DEV/PROD no publica puerto al host.
+LOCAL usa `.env.local`; DEV y PROD usan archivos `.env` distintos en sus directorios de servidor. Cada entorno tiene credenciales de base de datos y secretos JWT propios. DEV y PROD tienen contenedores, redes y volúmenes separados; PostgreSQL no publica puerto al host.
+
+Los servicios Compose son `api` y `postgres`. Sus contenedores son `tareas-api-local`/`tareas-postgres-local` en LOCAL, `tareas-api-dev`/`tareas-postgres-dev` en DEV y `tareas-api`/`tareas-postgres` en PROD.
 
 ## Local con PostgreSQL
 
@@ -26,13 +28,17 @@ Flyway crea una base vacia desde V1. El backend queda en 127.0.0.1:8080 y Postgr
 docker compose -f compose.dev.yaml --env-file .env up -d
 ```
 
-El seed solo se ejecuta con perfil `dev` y `DEV_SEED_ENABLED=true`. Es idempotente y exige passwords inyectados por `.env`; nunca se activa en PROD. La única credencial pública de ejemplo es `demo@marfern.dev` / `admin123`, exclusiva de DEV.
+El seed solo se ejecuta con perfil `dev` y `DEV_SEED_ENABLED=true`. Es idempotente y exige contraseñas inyectadas por `.env`; nunca se activa en PROD. La cuenta de demostración, si se habilita, es exclusiva de DEV.
 
 ## Migraciones y rollback
 
-Flyway se ejecuta antes de que Hibernate valide el modelo. Si una migracion falla, el contenedor no queda healthy y el despliegue no se marca exitoso. El rollback automatico solo restaura la imagen y `.env`: una migracion ya aplicada no se revierte. Las migraciones deben ser compatibles hacia atras (expandir, desplegar, migrar datos y contraer en una version posterior).
+Flyway se ejecuta antes de que Hibernate valide el modelo. Si una migración falla, el contenedor no queda healthy y el despliegue no se marca exitoso. El rollback automático restaura la imagen, los artefactos operativos del SHA previo y `.env`: una migración ya aplicada no se revierte. Las migraciones deben ser compatibles hacia atrás (expandir, desplegar, migrar datos y contraer en una versión posterior).
 
 Antes de una migracion delicada se ejecuta un backup PROD validado. No se automatiza ninguna restauracion.
+
+## Backups PostgreSQL
+
+Los timers systemd ejecutan `scripts/backup-db.sh` en cada entorno. DEV guarda dumps en `/srv/docker/backups/tareas-app-postgres-dev/` con retención de 3 días; PROD usa `/srv/docker/backups/tareas-app-postgres/` con retención de 14 días. El script comprueba el dump con `pg_restore --list`. La [guía de recuperación PROD](RECUPERACION-BACKUPS.md) describe la verificación y los límites de una conmutación manual.
 
 ## Ramas e imagenes
 
@@ -42,11 +48,11 @@ Un mismo commit SHA se construye como máximo una vez y su imagen puede arrancar
 
 Los marcadores `.deployed-sha`, `.failed-sha`, locks, logs y rollback viven dentro del directorio de cada entorno y no se comparten.
 
-## Cloudflare (manual)
+## Cloudflare Tunnel
 
-El túnel usa token y configuración remota. En Zero Trust > Networks > Tunnels > tunnel de `marserver` > Public Hostnames añadir:
+El túnel usa token y configuración remota. Los hostnames activos apuntan a:
 
 1. `donit-api-dev.marfern.dev` -> HTTP `localhost:8082`.
 2. `admin-dev.marfern.dev` -> HTTP `localhost:8083`.
 
-No editar ni eliminar los hostnames PROD. Verificar después con `/actuator/health` y `/health`.
+Los hostnames PROD apuntan a `donit-api.marfern.dev` → `localhost:8080` y `admin-donit.marfern.dev` → `localhost:8081`. Se comprueba la API mediante `/actuator/health` y Admin mediante `/health`.

@@ -36,7 +36,9 @@ El hash esperado se registra en el log de la ejecución que creó cada backup.
 El binario `pg_restore` no está en el host; se usa el del contenedor:
 
 ```bash
-docker cp /srv/docker/backups/tareas-app-postgres/tareas-app-*.dump \
+# Sustituir el nombre de ejemplo por el dump concreto que se va a verificar.
+BACKUP=/srv/docker/backups/tareas-app-postgres/tareas-app-YYYYMMDD-HHMMSS.dump
+docker cp "$BACKUP" \
   tareas-postgres:/tmp/list-check.dump
 docker exec tareas-postgres pg_restore --list /tmp/list-check.dump
 docker exec tareas-postgres rm -f /tmp/list-check.dump
@@ -71,7 +73,9 @@ docker exec tareas-postgres-restore-test pg_isready -U tareas_restore -d tareas_
 ## 5. Restaurar en una base nueva
 
 ```bash
-docker cp /srv/docker/backups/tareas-app-postgres/tareas-app-*.dump \
+# Sustituir el nombre de ejemplo por el dump concreto que se va a restaurar.
+BACKUP=/srv/docker/backups/tareas-app-postgres/tareas-app-YYYYMMDD-HHMMSS.dump
+docker cp "$BACKUP" \
   tareas-postgres-restore-test:/tmp/restore.dump
 docker exec tareas-postgres-restore-test \
   pg_restore -U tareas_restore -d tareas_restore_test \
@@ -97,13 +101,20 @@ docker rm -f tareas-postgres-restore-test
 Procedimiento general (documentación; no se ejecuta aquí sin autorización):
 
 1. Restaurar el dump en un contenedor PostgreSQL nuevo con un volumen propio
-   (pasos 4 y 5).
-2. Editar `/srv/docker/tareas-app-api/.env` y actualizar las variables
-   `DATABASE_*` (usar las credenciales del contenedor nuevo).
-3. `docker compose up -d --build` para recrear el contenedor `tareas-api`.
-4. Verificar: `curl -fsS http://127.0.0.1:8080/actuator/health` y
-   `curl -fsS https://donit-api.marfern.dev/actuator/health`.
-5. Probar primero en una instancia temporal antes de tocar producción.
+   y verificar los datos (pasos 4 y 5).
+2. Preparar y validar un cambio de Compose que conecte la API a ese contenedor,
+   con credenciales propias y sin sustituir el volumen original. El Compose
+   actual fija el host de base de datos a `postgres` y deriva usuario y clave de
+   `POSTGRES_*`: editar solo `.env` **no** cambia el destino de la conexión.
+3. Planificar la conmutación como operación manual supervisada. Mantener la
+   imagen GHCR del SHA desplegado y sus artefactos operativos; no construir una
+   imagen nueva ni asumir que Flyway revierte migraciones.
+4. Verificar salud local y pública (`/actuator/health`) y lecturas funcionales
+   antes de retirar cualquier recurso anterior.
+
+Esta guía cubre la verificación del dump y las restricciones de la conmutación.
+El cambio de topología y su reversión deben prepararse para el incidente
+concreto; no hay restauración automática.
 
 ## 7. Cómo volver atrás (rollback)
 
