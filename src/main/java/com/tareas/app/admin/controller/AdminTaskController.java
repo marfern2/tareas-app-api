@@ -28,8 +28,7 @@ public class AdminTaskController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String sort) {
 
-        log.info("Admin request: listar tareas - search={}, userId={}, completed={}, urgency={}, taskTypeId={}, page={}, size={}, sort={}",
-                search, userId, completed, urgency, taskTypeId, page, size, sort);
+        log.info("Admin request: listar tareas - page={}, size={}", page, size);
         return ResponseEntity.ok(adminTaskService.listarTareas(
                 search, userId, completed, urgency, taskTypeId, page, size, sort));
     }

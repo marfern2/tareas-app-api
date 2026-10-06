@@ -1,6 +1,7 @@
 package com.tareas.app.admin.security;
 
 import com.tareas.app.admin.exception.AdminRefreshTokenNoValidoException;
+import com.tareas.app.admin.exception.AdminRateLimitException;
 import com.tareas.app.admin.model.AdminRefreshToken;
 import com.tareas.app.admin.model.AdminUser;
 import com.tareas.app.admin.repository.AdminRefreshTokenRepository;
@@ -29,6 +30,7 @@ public class AdminRefreshTokenService {
 
     private final AdminRefreshTokenRepository adminRefreshTokenRepository;
     private final AdminJwtService adminJwtService;
+    private final AdminRateLimitService rateLimitService;
 
     @Value("${jwt.admin.refresh-expiration-days:7}")
     private long refreshExpirationDays;
@@ -70,6 +72,9 @@ public class AdminRefreshTokenService {
             log.warn("Reintento de admin refresh token expirado (admin user id={})", entidad.getAdminUser().getId());
             throw new AdminRefreshTokenNoValidoException();
         }
+
+        var admission = rateLimitService.allowRefreshAccount(entidad.getAdminUser().getId());
+        if (!admission.allowed()) throw new AdminRateLimitException(admission.retryAfterSeconds());
 
         entidad.setRevokedAt(ahora);
         adminRefreshTokenRepository.save(entidad);
@@ -113,7 +118,7 @@ public class AdminRefreshTokenService {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
-    String sha256Hex(String valor) {
+    public String sha256Hex(String valor) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(valor.getBytes(StandardCharsets.UTF_8));

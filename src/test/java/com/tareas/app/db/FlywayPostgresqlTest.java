@@ -1,5 +1,13 @@
 package com.tareas.app.db;
 
+import com.tareas.app.admin.dto.AdminUpdateUserRequest;
+import com.tareas.app.admin.model.AdminUser;
+import com.tareas.app.admin.repository.AdminUserRepository;
+import com.tareas.app.admin.security.AdminPermission;
+import com.tareas.app.admin.security.AdminUserDetails;
+import com.tareas.app.admin.service.AdminUserService;
+import com.tareas.app.exception.ResourceConflictException;
+import com.tareas.app.exception.ResourceNotFoundException;
 import com.tareas.app.model.Tarea;
 import com.tareas.app.model.TipoTarea;
 import com.tareas.app.model.Usuario;
@@ -15,13 +23,25 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -62,13 +82,115 @@ class FlywayPostgresqlTest {
     @Autowired
     private TareaRepository tareaRepository;
 
+    @Autowired
+    private AdminUserRepository adminUserRepository;
+
+    @Autowired
+    private AdminUserService adminUserService;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     @Test
-    @DisplayName("Flyway ejecuta V1+V2+V3+V4 en PostgreSQL vacio, validate pasa y los repositorios funcionan")
+    void concurrentProtectionWinsBeforeAdminMutation() throws Exception {
+        String marker = UUID.randomUUID().toString().substring(0, 8);
+        Usuario user = usuarioRepository.save(Usuario.builder().username("protected-" + marker)
+                .email("protected-" + marker + "@example.invalid").password("hash").build());
+        AdminUser admin = adminUserRepository.save(AdminUser.builder().username("concurrent-" + marker)
+                .email("concurrent-" + marker + "@example.invalid").passwordHash("hash")
+                .enabled(true).createdAt(LocalDateTime.now())
+                .permissions(EnumSet.of(AdminPermission.USER_WRITE)).build());
+        AdminUserDetails details = new AdminUserDetails(admin);
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch mutationStarted = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var protector = executor.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                jdbcTemplate.queryForObject("SELECT id FROM usuarios WHERE id = ? FOR UPDATE", Long.class, user.getId());
+                locked.countDown();
+                try {
+                    if (!release.await(10, TimeUnit.SECONDS)) throw new AssertionError("Timed out waiting for mutation");
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(ex);
+                }
+                jdbcTemplate.update("UPDATE usuarios SET protected_from_admin_mutation = true WHERE id = ?", user.getId());
+            }));
+            assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+            var mutation = executor.submit(() -> {
+                SecurityContextHolder.getContext().setAuthentication(
+                        new UsernamePasswordAuthenticationToken(details, null, details.getAuthorities()));
+                try {
+                    AdminUpdateUserRequest request = new AdminUpdateUserRequest();
+                    request.setUsername("changed-" + marker);
+                    mutationStarted.countDown();
+                    try {
+                        adminUserService.actualizarUsuario(user.getId(), request);
+                        return false;
+                    } catch (ResourceConflictException expected) {
+                        return true;
+                    }
+                } finally {
+                    SecurityContextHolder.clearContext();
+                }
+            });
+            assertThat(mutationStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            Thread.sleep(150);
+            release.countDown();
+            protector.get(10, TimeUnit.SECONDS);
+            assertThat(mutation.get(10, TimeUnit.SECONDS)).isTrue();
+        }
+        Usuario current = usuarioRepository.findById(user.getId()).orElseThrow();
+        assertThat(current.getUsername()).isEqualTo(user.getUsername());
+        assertThat(current.getProtectedFromAdminMutation()).isTrue();
+    }
+
+    @Test
+    void concurrentAdminDeletesCommitOnlyOnce() throws Exception {
+        String marker = UUID.randomUUID().toString().substring(0, 8);
+        Usuario user = usuarioRepository.save(Usuario.builder().username("delete-" + marker)
+                .email("delete-" + marker + "@example.invalid").password("hash").build());
+        AdminUser admin = adminUserRepository.save(AdminUser.builder().username("deleter-" + marker)
+                .email("deleter-" + marker + "@example.invalid").passwordHash("hash")
+                .enabled(true).createdAt(LocalDateTime.now())
+                .permissions(EnumSet.of(AdminPermission.USER_DELETE)).build());
+        AdminUserDetails details = new AdminUserDetails(admin);
+        CyclicBarrier start = new CyclicBarrier(2);
+        Callable<String> delete = () -> {
+            SecurityContextHolder.getContext().setAuthentication(
+                    new UsernamePasswordAuthenticationToken(details, null, details.getAuthorities()));
+            try {
+                start.await(10, TimeUnit.SECONDS);
+                try {
+                    adminUserService.eliminarUsuario(user.getId());
+                    return "deleted";
+                } catch (ResourceNotFoundException expected) {
+                    return "missing";
+                }
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
+        };
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(delete);
+            var second = executor.submit(delete);
+            assertThat(List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder("deleted", "missing");
+        }
+        assertThat(usuarioRepository.findById(user.getId())).isEmpty();
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM admin_audit_events "
+                + "WHERE operation = 'USER_DELETE' AND resource_id = ? AND outcome = 'SUCCESS'",
+                Integer.class, user.getId())).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Flyway ejecuta V1 a V5 en PostgreSQL vacio, validate pasa y los repositorios funcionan")
     void migracionDesdeCeroYFuncionamientoBasico() {
-        // 1. flyway_schema_history contiene exactamente V1, V2, V3 y V4 (success=true)
+        // 1. flyway_schema_history contiene exactamente V1 a V5 (success=true)
         List<Map<String, Object>> history = jdbcTemplate.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertThat(history).hasSize(4);
+        assertThat(history).hasSize(5);
         assertThat(history.get(0).get("version")).isEqualTo("1");
         assertThat(history.get(0).get("type")).isEqualTo("SQL");
         assertThat(history.get(0).get("success")).isEqualTo(true);
@@ -81,23 +203,26 @@ class FlywayPostgresqlTest {
         assertThat(history.get(3).get("version")).isEqualTo("4");
         assertThat(history.get(3).get("type")).isEqualTo("SQL");
         assertThat(history.get(3).get("success")).isEqualTo(true);
+        assertThat(history.get(4).get("version")).isEqualTo("5");
+        assertThat(history.get(4).get("success")).isEqualTo(true);
 
-        // 2. Flyway informa V1, V2, V3 y V4 como aplicadas y sin pendientes
+        // 2. Flyway informa V1 a V5 como aplicadas y sin pendientes
         MigrationInfo[] applied = flyway.info().applied();
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "1".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "2".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "3".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "4".equals(m.getVersion().getVersion()));
+        assertThat(applied).anyMatch(m -> m.getVersion() != null && "5".equals(m.getVersion().getVersion()));
         assertThat(flyway.info().pending()).isEmpty();
 
         // 3. Las tablas existen (Hibernate validate ya ha arrancado el contexto)
         List<String> tables = jdbcTemplate.queryForList(
                 "SELECT table_name FROM information_schema.tables "
-                        + "WHERE table_schema='public' AND table_name IN ('usuarios','tipos_tarea','tareas','refresh_tokens','admin_users','admin_refresh_tokens') "
+                        + "WHERE table_schema='public' AND table_name IN ('usuarios','tipos_tarea','tareas','refresh_tokens','admin_users','admin_refresh_tokens','admin_permissions','admin_audit_events') "
                         + "ORDER BY table_name",
                 String.class);
         assertThat(tables).containsExactly(
-                "admin_refresh_tokens", "admin_users",
+                "admin_audit_events", "admin_permissions", "admin_refresh_tokens", "admin_users",
                 "refresh_tokens", "tareas", "tipos_tarea", "usuarios");
 
         // 4. Repositorios funcionan y la identity genera IDs

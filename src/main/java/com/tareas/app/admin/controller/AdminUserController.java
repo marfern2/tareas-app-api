@@ -38,7 +38,7 @@ public class AdminUserController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String sort) {
 
-        log.info("Admin request: listar usuarios - search={}, page={}, size={}, sort={}", search, page, size, sort);
+        log.info("Admin request: listar usuarios - page={}, size={}", page, size);
         return ResponseEntity.ok(adminUserService.listarUsuarios(search, page, size, sort));
     }
 
@@ -65,7 +65,7 @@ public class AdminUserController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String sort) {
 
-        log.info("Admin request: tipos de tarea del usuario ID={} - page={}, size={}, sort={}", id, page, size, sort);
+        log.info("Admin request: tipos de tarea del usuario ID={} - page={}, size={}", id, page, size);
         return ResponseEntity.ok(adminUserService.listarTiposUsuario(id, page, size, sort));
     }
 

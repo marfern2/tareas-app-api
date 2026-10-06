@@ -1,10 +1,12 @@
 package com.tareas.app.admin.repository;
 
 import com.tareas.app.model.Usuario;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
@@ -14,6 +16,10 @@ public interface AdminUsuarioRepository extends JpaRepository<Usuario, Long> {
     Optional<Usuario> findByUsername(String username);
 
     Optional<Usuario> findByEmail(String email);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM Usuario u WHERE u.id = :id")
+    Optional<Usuario> findByIdForAdminMutation(@Param("id") Long id);
 
     @Query("""
             SELECT u.id AS id,
