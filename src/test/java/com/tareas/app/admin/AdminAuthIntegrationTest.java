@@ -213,6 +213,48 @@ class AdminAuthIntegrationTest {
         assertThat(parts).hasSize(3);
     }
 
+    @Test
+    @DisplayName("Admin deshabilitado no renueva sesión ni usa permisos previos")
+    void refreshDeshabilitadoFallaYAccessAnteriorNoAutoriza() throws Exception {
+        String email = email();
+        AdminUser admin = crearAdmin(email);
+        JsonNode loginBody = login(email);
+        String raw = loginBody.get("refreshToken").asText();
+        String access = loginBody.get("token").asText();
+
+        admin.setEnabled(false);
+        adminUserRepository.saveAndFlush(admin);
+
+        mockMvc.perform(post("/api/admin/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + raw + "\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Token de refresco inválido o expirado"));
+        mockMvc.perform(get("/api/admin/users")
+                        .header("Authorization", "Bearer " + access))
+                .andExpect(status().isUnauthorized());
+        assertThat(adminRefreshTokenRepository.findAll()).hasSize(1);
+        assertThat(adminUserRepository.findById(admin.getId()).orElseThrow().getPermissions())
+                .containsAll(java.util.EnumSet.allOf(AdminPermission.class));
+    }
+
+    @Test
+    @DisplayName("Refresh revocado permanece inválido para un admin habilitado")
+    void refreshRevocadoFalla() throws Exception {
+        String email = email();
+        crearAdmin(email);
+        String raw = login(email).get("refreshToken").asText();
+        AdminRefreshToken token = adminRefreshTokenRepository.findByTokenHash(sha256Hex(raw)).orElseThrow();
+        token.setRevokedAt(LocalDateTime.now());
+        adminRefreshTokenRepository.saveAndFlush(token);
+
+        mockMvc.perform(post("/api/admin/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + raw + "\"}"))
+                .andExpect(status().isUnauthorized());
+        assertThat(adminRefreshTokenRepository.findAll()).hasSize(1);
+    }
+
     // ========================================================================
     // 5. Reutilizar refresh antiguo -> 401
     // ========================================================================

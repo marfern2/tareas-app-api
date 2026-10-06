@@ -33,10 +33,18 @@ class FlywayAdminPermissionsCompatibilityTest {
                 .target(MigrationVersion.fromVersion("4")).load().migrate();
         jdbc.update("INSERT INTO admin_users (username, email, password_hash) VALUES (?, ?, ?)",
                 "legacy", "legacy@example.invalid", "hash");
+        jdbc.update("INSERT INTO admin_users (username, email, password_hash, enabled) VALUES (?, ?, ?, false)",
+                "disabled", "disabled@example.invalid", "hash");
+        jdbc.update("INSERT INTO admin_refresh_tokens (admin_user_id, token_hash, expires_at) "
+                        + "SELECT id, 'disabled-before-v6', now() + interval '1 day' FROM admin_users "
+                        + "WHERE username = 'disabled'");
 
         Flyway flyway = Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load();
         flyway.migrate();
         flyway.validate();
+
+        assertThat(jdbc.queryForObject("SELECT revoked_at IS NOT NULL FROM admin_refresh_tokens "
+                + "WHERE token_hash = 'disabled-before-v6'", Boolean.class)).isTrue();
 
         assertThat(jdbc.queryForList("SELECT permission FROM admin_permissions WHERE admin_user_id = "
                 + "(SELECT id FROM admin_users WHERE username='legacy') ORDER BY permission", String.class))

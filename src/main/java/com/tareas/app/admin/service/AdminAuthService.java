@@ -50,6 +50,12 @@ public class AdminAuthService {
             throw new BadCredentialsException("Credenciales inválidas");
         }
 
+        // Serialize token issuance with account disablement. A disable that
+        // follows this transaction will revoke the newly created session.
+        if (!adminUserRepository.lockEnabledForSession(adminUser.getId()).orElse(false)) {
+            throw new DisabledException("Admin deshabilitado");
+        }
+
         adminUser.setLastLogin(LocalDateTime.now());
         adminUserRepository.save(adminUser);
 
