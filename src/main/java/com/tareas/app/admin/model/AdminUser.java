@@ -8,6 +8,9 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Set;
+import com.tareas.app.admin.security.AdminPermission;
 
 @Entity
 @Table(name = "admin_users")
@@ -40,4 +43,11 @@ public class AdminUser {
 
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "admin_permissions", joinColumns = @JoinColumn(name = "admin_user_id"))
+    @Column(name = "permission", nullable = false, length = 32)
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    private Set<AdminPermission> permissions = new HashSet<>();
 }

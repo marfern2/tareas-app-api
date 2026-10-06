@@ -27,7 +27,7 @@ class AdminSearchNormalizationTest {
                 eq(""), isNull(), isNull(), isNull(), isNull(), any(Pageable.class)))
                 .thenReturn(Page.empty());
 
-        new AdminTaskService(tareas, usuarios, tipos)
+        new AdminTaskService(tareas, tipos, null, null)
                 .listarTareas(null, null, null, null, null, 0, 20, null);
 
         verify(tareas).findGlobalWithFilters(

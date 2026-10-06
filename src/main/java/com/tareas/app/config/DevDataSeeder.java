@@ -2,6 +2,7 @@ package com.tareas.app.config;
 
 import com.tareas.app.admin.model.AdminUser;
 import com.tareas.app.admin.repository.AdminUserRepository;
+import com.tareas.app.admin.security.AdminPermission;
 import com.tareas.app.model.Tarea;
 import com.tareas.app.model.TipoTarea;
 import com.tareas.app.model.Usuario;
@@ -23,6 +24,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.EnumSet;
 
 @Component
 @Profile("dev & !prod")
@@ -143,6 +145,7 @@ public class DevDataSeeder implements ApplicationRunner {
                 .passwordHash(passwordEncoder.encode(password))
                 .enabled(true)
                 .createdAt(LocalDateTime.now())
+                .permissions(EnumSet.allOf(AdminPermission.class))
                 .build());
     }
 

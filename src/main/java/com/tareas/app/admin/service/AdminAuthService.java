@@ -7,6 +7,8 @@ import com.tareas.app.admin.model.AdminUser;
 import com.tareas.app.admin.repository.AdminUserRepository;
 import com.tareas.app.admin.security.AdminJwtService;
 import com.tareas.app.admin.security.AdminRefreshTokenService;
+import com.tareas.app.admin.security.AdminRateLimitService;
+import com.tareas.app.admin.exception.AdminRateLimitException;
 import com.tareas.app.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,17 +29,20 @@ public class AdminAuthService {
     private final PasswordEncoder passwordEncoder;
     private final AdminJwtService adminJwtService;
     private final AdminRefreshTokenService adminRefreshTokenService;
+    private final AdminRateLimitService rateLimitService;
 
     @Transactional
     public AdminLoginResponseDTO login(AdminLoginDTO loginDTO) {
         String email = normalizarEmail(loginDTO.getEmail());
-        log.info("=== ADMIN LOGIN === Email: {}", email);
+        var admission = rateLimitService.allowLoginAccount(email);
+        if (!admission.allowed()) throw new AdminRateLimitException(admission.retryAfterSeconds());
+        log.info("Intento de login administrativo");
 
         AdminUser adminUser = adminUserRepository.findByEmail(email)
                 .orElseThrow(() -> new BadCredentialsException("Credenciales inválidas"));
 
         if (!adminUser.getEnabled()) {
-            log.warn("Intento de login con admin deshabilitado: {}", email);
+            log.warn("Intento de login con admin deshabilitado");
             throw new DisabledException("Admin deshabilitado");
         }
 
@@ -62,6 +67,10 @@ public class AdminAuthService {
     }
 
     public AdminRefreshResponseDTO refrescar(String tokenEnClaro) {
+        if (tokenEnClaro != null && !tokenEnClaro.isBlank()) {
+            var refreshAdmission = rateLimitService.allowRefreshToken(adminRefreshTokenService.sha256Hex(tokenEnClaro));
+            if (!refreshAdmission.allowed()) throw new AdminRateLimitException(refreshAdmission.retryAfterSeconds());
+        }
         return adminRefreshTokenService.rotar(tokenEnClaro);
     }
 

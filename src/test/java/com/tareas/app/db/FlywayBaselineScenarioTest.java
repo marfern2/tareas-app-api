@@ -65,10 +65,10 @@ class FlywayBaselineScenarioTest {
 
         flyway.migrate();
 
-        // 4. Historia: BASELINE v1 + SQL V2 + SQL V3 + SQL V4 (el baseline salta V1 y aplica las nuevas migraciones)
+        // 4. Historia: BASELINE v1 + SQL V2 a V5 (el baseline salta V1).
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertThat(history).hasSize(4);
+        assertThat(history).hasSize(5);
         assertThat(history.get(0).get("version")).isEqualTo("1");
         assertThat(history.get(0).get("type")).isEqualTo("BASELINE");
         assertThat(history.get(0).get("success")).isEqualTo(true);
@@ -81,6 +81,8 @@ class FlywayBaselineScenarioTest {
         assertThat(history.get(3).get("version")).isEqualTo("4");
         assertThat(history.get(3).get("type")).isEqualTo("SQL");
         assertThat(history.get(3).get("success")).isEqualTo(true);
+        assertThat(history.get(4).get("version")).isEqualTo("5");
+        assertThat(history.get(4).get("success")).isEqualTo(true);
 
         // 5. No quedan migraciones pendientes
         assertThat(flyway.info().pending()).isEmpty();
@@ -96,11 +98,11 @@ class FlywayBaselineScenarioTest {
         //    Si V1 se hubiera ejecutado, migrate() habria fallado por "relation already exists".
         List<String> tables = jdbc.queryForList(
                 "SELECT table_name FROM information_schema.tables "
-                        + "WHERE table_schema='public' AND table_name IN ('usuarios','tipos_tarea','tareas','refresh_tokens','admin_users','admin_refresh_tokens') "
+                        + "WHERE table_schema='public' AND table_name IN ('usuarios','tipos_tarea','tareas','refresh_tokens','admin_users','admin_refresh_tokens','admin_permissions','admin_audit_events') "
                         + "ORDER BY table_name",
                 String.class);
         assertThat(tables).containsExactly(
-                "admin_refresh_tokens", "admin_users",
+                "admin_audit_events", "admin_permissions", "admin_refresh_tokens", "admin_users",
                 "refresh_tokens", "tareas", "tipos_tarea", "usuarios");
     }
 

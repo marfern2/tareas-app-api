@@ -32,4 +32,8 @@ public class Usuario {
     @Column(nullable = false)
     @Builder.Default
     private Boolean enabled = true;
+
+    @Column(name = "protected_from_admin_mutation", nullable = false)
+    @Builder.Default
+    private Boolean protectedFromAdminMutation = false;
 }

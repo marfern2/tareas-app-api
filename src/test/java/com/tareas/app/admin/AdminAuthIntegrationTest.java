@@ -4,6 +4,7 @@ import com.tareas.app.admin.model.AdminRefreshToken;
 import com.tareas.app.admin.repository.AdminRefreshTokenRepository;
 import com.tareas.app.admin.repository.AdminUserRepository;
 import com.tareas.app.admin.model.AdminUser;
+import com.tareas.app.admin.security.AdminPermission;
 import com.tareas.app.security.JwtService;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
@@ -93,6 +94,7 @@ class AdminAuthIntegrationTest {
                 .passwordHash(passwordEncoder.encode(ADMIN_PASSWORD))
                 .enabled(true)
                 .createdAt(LocalDateTime.now())
+                .permissions(java.util.EnumSet.allOf(AdminPermission.class))
                 .build();
         return adminUserRepository.save(admin);
     }
@@ -104,6 +106,7 @@ class AdminAuthIntegrationTest {
                 .passwordHash(passwordEncoder.encode(ADMIN_PASSWORD))
                 .enabled(false)
                 .createdAt(LocalDateTime.now())
+                .permissions(java.util.EnumSet.allOf(AdminPermission.class))
                 .build();
         return adminUserRepository.save(admin);
     }
@@ -469,8 +472,8 @@ class AdminAuthIntegrationTest {
     }
 
     @Test
-    @DisplayName("GET /api/admin/lo-que-sea con JWT admin válido => 404 (pasa seguridad, endpoint no existe)")
-    void adminEndpointConJwtAdminValidoDevuelve404() throws Exception {
+    @DisplayName("GET /api/admin/lo-que-sea con JWT admin válido => 403 (ruta no permitida)")
+    void adminEndpointConJwtAdminValidoDevuelve403() throws Exception {
         String admEmail = email();
         crearAdmin(admEmail);
         JsonNode loginBody = login(admEmail);
@@ -478,7 +481,7 @@ class AdminAuthIntegrationTest {
 
         mockMvc.perform(get("/api/admin/lo-que-sea")
                         .header("Authorization", "Bearer " + adminToken))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isForbidden());
     }
 
     @Test
