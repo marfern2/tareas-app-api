@@ -2,7 +2,10 @@ package com.tareas.app.db;
 
 import com.tareas.app.admin.dto.AdminUpdateUserRequest;
 import com.tareas.app.admin.model.AdminUser;
+import com.tareas.app.admin.exception.AdminRefreshTokenNoValidoException;
 import com.tareas.app.admin.repository.AdminUserRepository;
+import com.tareas.app.admin.security.AdminRefreshTokenService;
+import com.tareas.app.admin.service.AdminAuthService;
 import com.tareas.app.admin.security.AdminPermission;
 import com.tareas.app.admin.security.AdminUserDetails;
 import com.tareas.app.admin.service.AdminUserService;
@@ -86,10 +89,116 @@ class FlywayPostgresqlTest {
     private AdminUserRepository adminUserRepository;
 
     @Autowired
+    private AdminRefreshTokenService adminRefreshTokenService;
+
+    @Autowired
+    private AdminAuthService adminAuthService;
+
+    @Autowired
     private AdminUserService adminUserService;
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Test
+    void disablingAdminRevokesAllSessionsWithoutChangingPermissionsOrAudit() {
+        String marker = UUID.randomUUID().toString().substring(0, 8);
+        AdminUser admin = adminUserRepository.save(AdminUser.builder().username("disable-" + marker)
+                .email("disable-" + marker + "@example.invalid").passwordHash("hash")
+                .enabled(true).createdAt(LocalDateTime.now())
+                .permissions(EnumSet.of(AdminPermission.ADMIN_READ)).build());
+        String first = adminRefreshTokenService.crearPara(admin);
+        String second = adminRefreshTokenService.crearPara(admin);
+        int auditBefore = jdbcTemplate.queryForObject("SELECT count(*) FROM admin_audit_events", Integer.class);
+
+        jdbcTemplate.update("UPDATE admin_users SET enabled = false WHERE id = ?", admin.getId());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM admin_refresh_tokens "
+                + "WHERE admin_user_id = ? AND revoked_at IS NOT NULL", Integer.class, admin.getId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM admin_permissions "
+                + "WHERE admin_user_id = ?", Integer.class, admin.getId())).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM admin_audit_events", Integer.class))
+                .isEqualTo(auditBefore);
+        assertThatThrownBy(() -> adminAuthService.refrescar(first))
+                .isInstanceOf(AdminRefreshTokenNoValidoException.class);
+        jdbcTemplate.update("UPDATE admin_users SET enabled = true WHERE id = ?", admin.getId());
+        assertThatThrownBy(() -> adminAuthService.refrescar(second))
+                .isInstanceOf(AdminRefreshTokenNoValidoException.class);
+    }
+
+    @Test
+    void concurrentDisableWinsBeforeRefresh() throws Exception {
+        String marker = UUID.randomUUID().toString().substring(0, 8);
+        AdminUser admin = adminUserRepository.save(AdminUser.builder().username("race-" + marker)
+                .email("race-" + marker + "@example.invalid").passwordHash("hash")
+                .enabled(true).createdAt(LocalDateTime.now()).build());
+        String raw = adminRefreshTokenService.crearPara(admin);
+        CountDownLatch disabledButUncommitted = new CountDownLatch(1);
+        CountDownLatch releaseDisable = new CountDownLatch(1);
+        CountDownLatch refreshStarted = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var disable = executor.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                jdbcTemplate.update("UPDATE admin_users SET enabled = false WHERE id = ?", admin.getId());
+                disabledButUncommitted.countDown();
+                try {
+                    if (!releaseDisable.await(10, TimeUnit.SECONDS)) throw new AssertionError("timeout");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(e);
+                }
+            }));
+            assertThat(disabledButUncommitted.await(10, TimeUnit.SECONDS)).isTrue();
+            var refresh = executor.submit(() -> {
+                refreshStarted.countDown();
+                return adminAuthService.refrescar(raw);
+            });
+            assertThat(refreshStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            releaseDisable.countDown();
+            disable.get(10, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> refresh.get(10, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(AdminRefreshTokenNoValidoException.class);
+        } finally {
+            releaseDisable.countDown();
+        }
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM admin_refresh_tokens "
+                + "WHERE admin_user_id = ? AND revoked_at IS NULL", Integer.class, admin.getId())).isZero();
+    }
+
+    @Test
+    void concurrentRefreshFinishesFirstAndDisableRevokesRotatedSession() throws Exception {
+        String marker = UUID.randomUUID().toString().substring(0, 8);
+        AdminUser admin = adminUserRepository.save(AdminUser.builder().username("rotate-" + marker)
+                .email("rotate-" + marker + "@example.invalid").passwordHash("hash")
+                .enabled(true).createdAt(LocalDateTime.now()).build());
+        String raw = adminRefreshTokenService.crearPara(admin);
+        CountDownLatch rotatedButUncommitted = new CountDownLatch(1);
+        CountDownLatch releaseRefresh = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var refresh = executor.submit(() -> new TransactionTemplate(transactionManager).execute(status -> {
+                String next = adminAuthService.refrescar(raw).getRefreshToken();
+                rotatedButUncommitted.countDown();
+                try {
+                    if (!releaseRefresh.await(10, TimeUnit.SECONDS)) throw new AssertionError("timeout");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(e);
+                }
+                return next;
+            }));
+            assertThat(rotatedButUncommitted.await(10, TimeUnit.SECONDS)).isTrue();
+            var disable = executor.submit(() -> jdbcTemplate.update(
+                    "UPDATE admin_users SET enabled = false WHERE id = ?", admin.getId()));
+            releaseRefresh.countDown();
+            String next = refresh.get(10, TimeUnit.SECONDS);
+            assertThat(disable.get(10, TimeUnit.SECONDS)).isEqualTo(1);
+            assertThatThrownBy(() -> adminAuthService.refrescar(next))
+                    .isInstanceOf(AdminRefreshTokenNoValidoException.class);
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM admin_refresh_tokens "
+                    + "WHERE admin_user_id = ? AND revoked_at IS NULL", Integer.class, admin.getId())).isZero();
+        } finally {
+            releaseRefresh.countDown();
+        }
+    }
 
     @Test
     void concurrentProtectionWinsBeforeAdminMutation() throws Exception {
@@ -185,12 +294,12 @@ class FlywayPostgresqlTest {
     }
 
     @Test
-    @DisplayName("Flyway ejecuta V1 a V5 en PostgreSQL vacio, validate pasa y los repositorios funcionan")
+    @DisplayName("Flyway ejecuta V1 a V6 en PostgreSQL vacio, validate pasa y los repositorios funcionan")
     void migracionDesdeCeroYFuncionamientoBasico() {
-        // 1. flyway_schema_history contiene exactamente V1 a V5 (success=true)
+        // 1. flyway_schema_history contiene exactamente V1 a V6 (success=true)
         List<Map<String, Object>> history = jdbcTemplate.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertThat(history).hasSize(5);
+        assertThat(history).hasSize(6);
         assertThat(history.get(0).get("version")).isEqualTo("1");
         assertThat(history.get(0).get("type")).isEqualTo("SQL");
         assertThat(history.get(0).get("success")).isEqualTo(true);
@@ -205,14 +314,17 @@ class FlywayPostgresqlTest {
         assertThat(history.get(3).get("success")).isEqualTo(true);
         assertThat(history.get(4).get("version")).isEqualTo("5");
         assertThat(history.get(4).get("success")).isEqualTo(true);
+        assertThat(history.get(5).get("version")).isEqualTo("6");
+        assertThat(history.get(5).get("success")).isEqualTo(true);
 
-        // 2. Flyway informa V1 a V5 como aplicadas y sin pendientes
+        // 2. Flyway informa V1 a V6 como aplicadas y sin pendientes
         MigrationInfo[] applied = flyway.info().applied();
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "1".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "2".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "3".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "4".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "5".equals(m.getVersion().getVersion()));
+        assertThat(applied).anyMatch(m -> m.getVersion() != null && "6".equals(m.getVersion().getVersion()));
         assertThat(flyway.info().pending()).isEmpty();
 
         // 3. Las tablas existen (Hibernate validate ya ha arrancado el contexto)
@@ -332,7 +444,7 @@ class FlywayPostgresqlTest {
 
         // 15. V3: admin_users: enabled default es true
         Integer enabledCount = jdbcTemplate.queryForObject(
-                "SELECT count(*) FROM admin_users WHERE enabled = true", Integer.class);
+                "SELECT count(*) FROM admin_users WHERE username = 'admin1' AND enabled = true", Integer.class);
         assertThat(enabledCount).isEqualTo(1);
     }
 }

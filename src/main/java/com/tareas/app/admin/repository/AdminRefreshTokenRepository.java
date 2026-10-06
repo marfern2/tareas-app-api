@@ -15,6 +15,9 @@ public interface AdminRefreshTokenRepository extends JpaRepository<AdminRefreshT
 
     Optional<AdminRefreshToken> findByTokenHash(String tokenHash);
 
+    @Query("SELECT art.adminUser.id FROM AdminRefreshToken art WHERE art.tokenHash = :tokenHash")
+    Optional<Long> findAdminUserIdByTokenHash(@Param("tokenHash") String tokenHash);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT art FROM AdminRefreshToken art WHERE art.tokenHash = :tokenHash")
     Optional<AdminRefreshToken> findByTokenHashParaActualizar(@Param("tokenHash") String tokenHash);
