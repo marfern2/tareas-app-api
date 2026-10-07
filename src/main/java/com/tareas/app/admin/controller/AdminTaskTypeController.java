@@ -24,8 +24,7 @@ public class AdminTaskTypeController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String sort) {
 
-        log.info("Admin request: listar tipos de tarea - search={}, page={}, size={}, sort={}",
-                search, page, size, sort);
+        log.info("Admin request: listar tipos de tarea - page={}, size={}", page, size);
         return ResponseEntity.ok(adminTaskTypeService.listarTipos(search, page, size, sort));
     }
 

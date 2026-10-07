@@ -62,7 +62,7 @@ public class AdminJwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
         } catch (Exception e) {
-            log.debug("Error procesando token JWT admin: {}", e.getMessage());
+            log.debug("Token JWT administrativo inválido");
         }
 
         filterChain.doFilter(request, response);

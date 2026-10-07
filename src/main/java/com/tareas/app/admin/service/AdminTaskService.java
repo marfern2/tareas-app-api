@@ -7,7 +7,6 @@ import com.tareas.app.admin.dto.AdminTaskSummaryDTO;
 import com.tareas.app.admin.dto.AdminUpdateTaskRequest;
 import com.tareas.app.admin.repository.AdminTipoTareaRepository;
 import com.tareas.app.admin.repository.AdminTareaRepository;
-import com.tareas.app.admin.repository.AdminUsuarioRepository;
 import com.tareas.app.exception.ResourceNotFoundException;
 import com.tareas.app.exception.ValidacionException;
 import com.tareas.app.model.Tarea;
@@ -20,6 +19,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Set;
@@ -30,8 +30,9 @@ import java.util.Set;
 public class AdminTaskService {
 
     private final AdminTareaRepository adminTareaRepository;
-    private final AdminUsuarioRepository adminUsuarioRepository;
     private final AdminTipoTareaRepository adminTipoTareaRepository;
+    private final AdminAuditService adminAuditService;
+    private final AdminProtectedUserGuard protectedUserGuard;
 
     private static final Set<String> ALLOWED_SORT_FIELDS = Set.of("id", "titulo", "fecha", "completada", "urgencia");
     private static final int MAX_PAGE_SIZE = 100;
@@ -86,9 +87,9 @@ public class AdminTaskService {
     }
 
     @Transactional
+    @PreAuthorize("hasAuthority('TASK_WRITE')")
     public AdminTaskDetailDTO crearTarea(Long usuarioId, AdminCreateTaskRequest request) {
-        Usuario usuario = adminUsuarioRepository.findById(usuarioId)
-                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+        Usuario usuario = protectedUserGuard.requireMutable(usuarioId);
 
         TipoTarea tipoTarea = adminTipoTareaRepository.findByIdAndUsuarioId(request.getTipoTareaId(), usuarioId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tipo de tarea no encontrado para este usuario"));
@@ -104,15 +105,16 @@ public class AdminTaskService {
                 .build();
 
         Tarea tareaGuardada = adminTareaRepository.save(tarea);
+        adminAuditService.success("TASK_CREATE", "TASK", tareaGuardada.getId());
         log.info("Admin creó tarea ID={} para usuario ID={}", tareaGuardada.getId(), usuarioId);
 
         return toDetailDTO(tareaGuardada);
     }
 
     @Transactional
+    @PreAuthorize("hasAuthority('TASK_WRITE')")
     public AdminTaskDetailDTO actualizarTarea(Long usuarioId, Long tareaId, AdminUpdateTaskRequest request) {
-        Usuario usuario = adminUsuarioRepository.findById(usuarioId)
-                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+        Usuario usuario = protectedUserGuard.requireMutable(usuarioId);
 
         Tarea tarea = adminTareaRepository.findByIdAndUsuarioId(tareaId, usuarioId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tarea no encontrada para este usuario"));
@@ -158,21 +160,22 @@ public class AdminTaskService {
         }
 
         Tarea tareaActualizada = adminTareaRepository.save(tarea);
+        adminAuditService.success("TASK_UPDATE", "TASK", tareaId);
         log.info("Admin actualizó tarea ID={} del usuario ID={}", tareaId, usuarioId);
 
         return toDetailDTO(tareaActualizada);
     }
 
     @Transactional
+    @PreAuthorize("hasAuthority('TASK_WRITE')")
     public void eliminarTarea(Long usuarioId, Long tareaId) {
-        if (!adminUsuarioRepository.existsById(usuarioId)) {
-            throw new ResourceNotFoundException("Usuario no encontrado");
-        }
+        protectedUserGuard.requireMutable(usuarioId);
 
         Tarea tarea = adminTareaRepository.findByIdAndUsuarioId(tareaId, usuarioId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tarea no encontrada para este usuario"));
 
         adminTareaRepository.delete(tarea);
+        adminAuditService.success("TASK_DELETE", "TASK", tareaId);
         log.info("Admin eliminó tarea ID={} del usuario ID={}", tareaId, usuarioId);
     }
 

@@ -21,6 +21,8 @@ java {
 // resueltas por Spring Boot 4.0.7 o dependencias transitivas. Parches dentro
 // de la misma rama menor.
 ext {
+    // Spring Framework 7.0.9 corrige CVE-2026-47884 en spring-webmvc (7.0.8 en el BOM de Boot 4.0.7).
+    set('spring-framework.version', '7.0.9')
     // Jackson 2 -> 2.21.7: corrige GHSA-cxp5-3px4-pw24, GHSA-wv8q-qhhj-9h54 y tres avisos adicionales del mismo paquete.
     set('jackson-2-bom.version', '2.21.7')
     // Jackson 3 -> 3.1.7: corrige los mismos avisos en tools.jackson.core:jackson-databind.

@@ -69,6 +69,9 @@ jobs:
         run: |
           mkdir -p build/reports/osv-scanner
 
+          # Exit 1 significa hallazgos. Conservamos el informe para que el gate
+          # muestre los paquetes afectados; cualquier otro error sigue fallando.
+          set +e
           docker run --rm \
             -v "$PWD:/src" \
             ghcr.io/google/osv-scanner:v2.4.0 \
@@ -78,6 +81,14 @@ jobs:
             --format=json \
             --output-file=/src/build/reports/osv-scanner/osv-results.json \
             /src/build/reports/cyclonedx-direct/bom.json
+          scan_status=$?
+          set -e
+
+          printf '%s\n' "$scan_status" > build/reports/osv-scanner/osv-exit-code.txt
+          if [ "$scan_status" -ne 0 ] && [ "$scan_status" -ne 1 ]; then
+            echo "::error::OSV-Scanner failed with exit code $scan_status"
+            exit "$scan_status"
+          fi
 
       - name: OSV vulnerability gate
         shell: bash
@@ -88,6 +99,14 @@ jobs:
           import sys
 
           path = "build/reports/osv-scanner/osv-results.json"
+          status_path = "build/reports/osv-scanner/osv-exit-code.txt"
+
+          try:
+              with open(status_path, encoding="utf-8") as f:
+                  scan_status = int(f.read().strip())
+          except (OSError, ValueError) as exc:
+              print(f"::error::Unable to read OSV exit code: {exc}")
+              sys.exit(1)
 
           if not os.path.isfile(path):
               print(f"::error::OSV report was not generated: {path}")
@@ -121,6 +140,10 @@ jobs:
               for vuln_id, name, version in vulns:
                   print(f"::error::  - {vuln_id} {name}@{version}")
 
+              sys.exit(1)
+
+          if scan_status != 0:
+              print(f"::error::OSV-Scanner exited {scan_status} without reported vulnerabilities")
               sys.exit(1)
 
           print("OSV-Scanner: 0 vulnerabilities")

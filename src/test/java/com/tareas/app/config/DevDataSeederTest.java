@@ -2,6 +2,7 @@ package com.tareas.app.config;
 
 import com.tareas.app.admin.model.AdminUser;
 import com.tareas.app.admin.repository.AdminUserRepository;
+import com.tareas.app.admin.security.AdminPermission;
 import com.tareas.app.model.Tarea;
 import com.tareas.app.model.TipoTarea;
 import com.tareas.app.model.Usuario;
@@ -11,6 +12,7 @@ import com.tareas.app.repository.UsuarioRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.ArrayList;
@@ -39,6 +41,23 @@ class DevDataSeederTest {
     private static final String USER_PASSWORD_FROM_ENV = "user-value-from-test-env";
 
     @Test
+    void nuevosAdministradoresDevRecibenSoloLosCuatroPermisosHistoricos() {
+        Fixture fixture = new Fixture();
+
+        fixture.seeder().run(null);
+
+        for (AdminUser admin : fixture.adminsByEmail.values()) {
+            assertThat(admin.getPermissions()).containsExactlyInAnyOrder(
+                    AdminPermission.ADMIN_READ, AdminPermission.USER_WRITE,
+                    AdminPermission.USER_DELETE, AdminPermission.TASK_WRITE);
+            assertThat(admin.getPermissions()).doesNotContain(
+                    AdminPermission.DEMO_READ, AdminPermission.DEMO_WRITE,
+                    AdminPermission.DEMO_PUBLISH, AdminPermission.DEMO_RESTORE);
+        }
+        assertThat(fixture.adminsByEmail).hasSize(2).containsKeys(PRIVATE_EMAIL, DEMO_EMAIL);
+    }
+
+    @Test
     void seedEsIdempotenteYNoDuplicaDatos() {
         Fixture fixture = new Fixture();
         DevDataSeeder seeder = fixture.seeder();
@@ -48,6 +67,12 @@ class DevDataSeederTest {
 
         assertThat(fixture.adminsByEmail).hasSize(2).containsKeys(PRIVATE_EMAIL, DEMO_EMAIL);
         assertThat(fixture.usersByUsername).hasSize(3);
+        assertThat(fixture.usersByUsername.get("alex-demo").getDevFixtureKey())
+                .isEqualTo("donit-dev-seed:v1:alex-demo");
+        assertThat(fixture.usersByUsername.get("alex-demo").getProtectedFromAdminMutation()).isFalse();
+        assertThat(fixture.usersByUsername.get("sam-demo").getProtectedFromAdminMutation()).isTrue();
+        assertThat(fixture.usersByUsername.get("disabled-demo").getProtectedFromAdminMutation()).isTrue();
+        assertThat(fixture.usersByUsername.get("disabled-demo").getEnabled()).isFalse();
         assertThat(fixture.types).hasSize(4);
         assertThat(fixture.tasks).hasSize(6);
         assertThat(fixture.tasks).extracting(Tarea::getTitulo).doesNotHaveDuplicates();
@@ -125,18 +150,118 @@ class DevDataSeederTest {
     }
 
     @Test
-    void usuarioFicticioConUsernameOcupadoPorOtroEmailFallaSinCrearDatos() {
+    void usuarioFicticioConUsernameOcupadoPorOtroEmailOmiteSeedSinCrearDatos() {
         Fixture fixture = new Fixture();
         Usuario existing = Usuario.builder().id(80L).username("alex-demo")
                 .email("otro@example.invalid").enabled(true).build();
         fixture.usersByUsername.put(existing.getUsername(), existing);
         fixture.usersByEmail.put(existing.getEmail(), existing);
 
-        assertThatThrownBy(() -> fixture.seeder().run(null))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Username ficticio DEV");
+        fixture.seeder().run(null);
+        assertThat(fixture.adminsByEmail).isEmpty();
+        assertThat(fixture.usersByUsername).hasSize(1);
         assertThat(fixture.types).isEmpty();
         assertThat(fixture.tasks).isEmpty();
+    }
+
+    @Test
+    void coincidenciaExactaSinMarcaNoSeAdoptaNiSeProtege() {
+        Fixture fixture = new Fixture();
+        fixture.putUser(Usuario.builder().id(80L).username("alex-demo")
+                .email("alex@example.invalid").password("hash-real").enabled(true).build());
+
+        fixture.seeder().run(null);
+        assertThat(fixture.adminsByEmail).isEmpty();
+        assertThat(fixture.usersByUsername).hasSize(1);
+        assertThat(fixture.usersByUsername.get("alex-demo").getDevFixtureKey()).isNull();
+        assertThat(fixture.usersByUsername.get("alex-demo").getProtectedFromAdminMutation()).isFalse();
+        assertThat(fixture.types).isEmpty();
+        assertThat(fixture.tasks).isEmpty();
+    }
+
+    @Test
+    void samYDisabledExistentesSinMarcaNoSeProtegenAutomaticamente() {
+        for (String username : List.of("sam-demo", "disabled-demo")) {
+            Fixture fixture = new Fixture();
+            Usuario existing = Usuario.builder().id(80L).username(username)
+                    .email(username.equals("sam-demo") ? "sam@example.invalid" : "disabled@example.invalid")
+                    .password("hash-preexistente").enabled(!username.equals("disabled-demo"))
+                    .protectedFromAdminMutation(false).build();
+            fixture.putUser(existing);
+
+            fixture.seeder().run(null);
+            assertThat(fixture.adminsByEmail).isEmpty();
+            assertThat(fixture.usersByUsername).hasSize(1);
+            assertThat(existing.getDevFixtureKey()).isNull();
+            assertThat(existing.getProtectedFromAdminMutation()).isFalse();
+        }
+    }
+
+    @Test
+    void fixturesAdoptadosConMarcaSeReconocenYSeAplicaPolitica() {
+        Fixture fixture = new Fixture();
+        fixture.putUser(Usuario.builder().id(80L).username("alex-demo")
+                .email("alex@example.invalid").password("hash-alex").enabled(true)
+                .devFixtureKey("donit-dev-seed:v1:alex-demo")
+                .protectedFromAdminMutation(true).build());
+        fixture.putUser(Usuario.builder().id(81L).username("sam-demo")
+                .email("sam@example.invalid").password("hash-sam").enabled(true)
+                .devFixtureKey("donit-dev-seed:v1:sam-demo")
+                .protectedFromAdminMutation(false).build());
+        fixture.putUser(Usuario.builder().id(82L).username("disabled-demo")
+                .email("disabled@example.invalid").password("hash-disabled").enabled(false)
+                .devFixtureKey("donit-dev-seed:v1:disabled-demo")
+                .protectedFromAdminMutation(false).build());
+
+        fixture.seeder().run(null);
+        fixture.seeder().run(null);
+
+        assertThat(fixture.usersByUsername).hasSize(3);
+        assertThat(fixture.usersByUsername.get("alex-demo").getProtectedFromAdminMutation()).isFalse();
+        assertThat(fixture.usersByUsername.get("sam-demo").getProtectedFromAdminMutation()).isTrue();
+        assertThat(fixture.usersByUsername.get("disabled-demo").getProtectedFromAdminMutation()).isTrue();
+        assertThat(fixture.usersByUsername.get("sam-demo").getPassword()).isEqualTo("hash-sam");
+        assertThat(fixture.types).hasSize(4);
+        assertThat(fixture.tasks).hasSize(6);
+        verify(fixture.passwordEncoder, times(2)).encode(anyString());
+    }
+
+    @Test
+    void marcaDeOtroUsuarioNoAutorizaAdopcionPorNombre() {
+        Fixture fixture = new Fixture();
+        fixture.putUser(Usuario.builder().id(80L).username("alex-demo")
+                .email("alex@example.invalid").password("hash")
+                .devFixtureKey("donit-dev-seed:v1:otra-cuenta").build());
+
+        fixture.seeder().run(null);
+        assertThat(fixture.usersByUsername.get("alex-demo").getDevFixtureKey())
+                .isEqualTo("donit-dev-seed:v1:otra-cuenta");
+    }
+
+    @Test
+    void marcaPermiteCambiosDeIdentidadDeAlexEnQa() {
+        Fixture fixture = new Fixture();
+        fixture.putUser(Usuario.builder().id(80L).username("alex-qa")
+                .email("alex-qa@example.invalid").password("hash")
+                .devFixtureKey("donit-dev-seed:v1:alex-demo").build());
+
+        fixture.seeder().run(null);
+        assertThat(fixture.usersByUsername.get("alex-qa").getProtectedFromAdminMutation()).isFalse();
+        assertThat(fixture.usersByUsername).doesNotContainKey("alex-demo");
+    }
+
+    @Test
+    void marcaNoPermiteColisionConNombreOriginal() {
+        Fixture fixture = new Fixture();
+        fixture.putUser(Usuario.builder().id(80L).username("alex-qa")
+                .email("alex-qa@example.invalid").password("hash")
+                .devFixtureKey("donit-dev-seed:v1:alex-demo").build());
+        fixture.putUser(Usuario.builder().id(81L).username("alex-demo")
+                .email("real@example.invalid").password("hash-real").build());
+
+        fixture.seeder().run(null);
+        assertThat(fixture.usersByUsername).hasSize(2);
+        assertThat(fixture.adminsByEmail).isEmpty();
     }
 
     @Test
@@ -165,6 +290,29 @@ class DevDataSeederTest {
         assertThat(property.matchIfMissing()).isFalse();
     }
 
+    @Test
+    void condicionDePerfilYFlagNoRegistraSeederEnProd() {
+        ApplicationContextRunner runner = new ApplicationContextRunner()
+                .withUserConfiguration(DevDataSeeder.class)
+                .withBean(AdminUserRepository.class, () -> mock(AdminUserRepository.class))
+                .withBean(UsuarioRepository.class, () -> mock(UsuarioRepository.class))
+                .withBean(TipoTareaRepository.class, () -> mock(TipoTareaRepository.class))
+                .withBean(TareaRepository.class, () -> mock(TareaRepository.class))
+                .withBean(PasswordEncoder.class, () -> mock(PasswordEncoder.class));
+
+        runner.withInitializer(context -> context.getEnvironment().setActiveProfiles("dev"))
+                .withPropertyValues("app.dev.seed.enabled=true")
+                .run(context -> assertThat(context).hasSingleBean(DevDataSeeder.class));
+        runner.withInitializer(context -> context.getEnvironment().setActiveProfiles("dev"))
+                .run(context -> assertThat(context).doesNotHaveBean(DevDataSeeder.class));
+        runner.withInitializer(context -> context.getEnvironment().setActiveProfiles("prod"))
+                .withPropertyValues("app.dev.seed.enabled=true")
+                .run(context -> assertThat(context).doesNotHaveBean(DevDataSeeder.class));
+        runner.withInitializer(context -> context.getEnvironment().setActiveProfiles("dev", "prod"))
+                .withPropertyValues("app.dev.seed.enabled=true")
+                .run(context -> assertThat(context).doesNotHaveBean(DevDataSeeder.class));
+    }
+
     private static final class Fixture {
         private final AdminUserRepository adminUsers = mock(AdminUserRepository.class);
         private final UsuarioRepository usuarios = mock(UsuarioRepository.class);
@@ -175,6 +323,7 @@ class DevDataSeederTest {
         private final Map<String, AdminUser> adminsByUsername = new LinkedHashMap<>();
         private final Map<String, Usuario> usersByUsername = new LinkedHashMap<>();
         private final Map<String, Usuario> usersByEmail = new LinkedHashMap<>();
+        private final Map<String, Usuario> usersByFixtureKey = new LinkedHashMap<>();
         private final List<TipoTarea> types = new ArrayList<>();
         private final List<Tarea> tasks = new ArrayList<>();
         private final AtomicLong ids = new AtomicLong(1);
@@ -200,13 +349,14 @@ class DevDataSeederTest {
                     Optional.ofNullable(usersByUsername.get(invocation.getArgument(0, String.class))));
             when(usuarios.findByEmail(anyString())).thenAnswer(invocation ->
                     Optional.ofNullable(usersByEmail.get(invocation.getArgument(0, String.class))));
+            when(usuarios.findByDevFixtureKey(anyString())).thenAnswer(invocation ->
+                    Optional.ofNullable(usersByFixtureKey.get(invocation.getArgument(0, String.class))));
             when(usuarios.save(any(Usuario.class))).thenAnswer(invocation -> {
                 Usuario user = invocation.getArgument(0, Usuario.class);
                 if (user.getId() == null) {
                     user.setId(ids.getAndIncrement());
                 }
-                usersByUsername.put(user.getUsername(), user);
-                usersByEmail.put(user.getEmail(), user);
+                putUser(user);
                 return user;
             });
 
@@ -258,6 +408,14 @@ class DevDataSeederTest {
         private void putAdmin(AdminUser admin) {
             adminsByEmail.put(admin.getEmail(), admin);
             adminsByUsername.put(admin.getUsername(), admin);
+        }
+
+        private void putUser(Usuario user) {
+            usersByUsername.put(user.getUsername(), user);
+            usersByEmail.put(user.getEmail(), user);
+            if (user.getDevFixtureKey() != null) {
+                usersByFixtureKey.put(user.getDevFixtureKey(), user);
+            }
         }
     }
 }

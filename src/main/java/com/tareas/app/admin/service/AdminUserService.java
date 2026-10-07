@@ -29,6 +29,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -46,6 +47,8 @@ public class AdminUserService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final TareaRepository tareaRepository;
     private final TipoTareaRepository tipoTareaRepository;
+    private final AdminAuditService adminAuditService;
+    private final AdminProtectedUserGuard protectedUserGuard;
 
     private static final Set<String> ALLOWED_SORT_FIELDS_TASK_TYPES = Set.of("id", "nombre", "color");
 
@@ -148,6 +151,7 @@ public class AdminUserService {
     }
 
     @Transactional
+    @PreAuthorize("hasAuthority('USER_WRITE')")
     public AdminUserDetailDTO actualizarUsuario(Long id, AdminUpdateUserRequest request) {
         boolean hasUsername = request.getUsername() != null && !request.getUsername().isBlank();
         boolean hasEmail = request.getEmail() != null && !request.getEmail().isBlank();
@@ -156,8 +160,7 @@ public class AdminUserService {
             throw new ValidacionException("body", "El body no puede estar vacío");
         }
 
-        Usuario usuario = adminUsuarioRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+        Usuario usuario = protectedUserGuard.requireMutable(id);
 
         if (request.getUsername() != null && request.getUsername().isBlank()) {
             throw new ValidacionException("username", "El username no puede estar vacío");
@@ -188,6 +191,7 @@ public class AdminUserService {
         }
 
         adminUsuarioRepository.save(usuario);
+        adminAuditService.success("USER_UPDATE", "USER", id);
 
         long totalTasks = adminTareaRepository.countByUsuarioId(id);
         long completedTasks = adminTareaRepository.countCompletedByUsuarioId(id);
@@ -205,13 +209,14 @@ public class AdminUserService {
     }
 
     @Transactional
+    @PreAuthorize("hasAuthority('USER_WRITE')")
     public AdminUserDetailDTO actualizarEnabled(Long id, AdminSetUserEnabledRequest request) {
-        Usuario usuario = adminUsuarioRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+        Usuario usuario = protectedUserGuard.requireMutable(id);
 
         boolean wasEnabled = Boolean.TRUE.equals(usuario.getEnabled());
         usuario.setEnabled(request.isEnabled());
         adminUsuarioRepository.save(usuario);
+        adminAuditService.success("USER_ENABLED_UPDATE", "USER", id);
 
         if (wasEnabled && !request.isEnabled()) {
             revocarRefreshTokensPorUsuario(id);
@@ -234,9 +239,9 @@ public class AdminUserService {
     }
 
     @Transactional
+    @PreAuthorize("hasAuthority('USER_DELETE')")
     public void eliminarUsuario(Long id) {
-        Usuario usuario = adminUsuarioRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+        Usuario usuario = protectedUserGuard.requireMutable(id);
 
         List<Tarea> tareas = tareaRepository.findByUsuarioId(id);
         if (!tareas.isEmpty()) {
@@ -251,13 +256,14 @@ public class AdminUserService {
         refreshTokenRepository.eliminarPorUsuario(id);
 
         adminUsuarioRepository.delete(usuario);
+        adminAuditService.success("USER_DELETE", "USER", id);
         log.info("Usuario {} eliminado junto con {} tareas y {} tipos de tarea", id, tareas.size(), tipos.size());
     }
 
     @Transactional
+    @PreAuthorize("hasAuthority('TASK_WRITE')")
     public AdminTaskTypeDetailDTO crearTipo(Long usuarioId, AdminCreateTaskTypeRequest request) {
-        Usuario usuario = adminUsuarioRepository.findById(usuarioId)
-                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+        Usuario usuario = protectedUserGuard.requireMutable(usuarioId);
 
         if (adminTipoTareaRepository.existsByNombreIgnoreCaseAndUsuarioId(request.getNombre(), usuarioId)) {
             throw new ResourceConflictException("Ya existe un tipo de tarea con ese nombre para este usuario");
@@ -271,6 +277,7 @@ public class AdminUserService {
                 .build();
 
         TipoTarea guardado = adminTipoTareaRepository.save(tipoTarea);
+        adminAuditService.success("TASK_TYPE_CREATE", "TASK_TYPE", guardado.getId());
         log.info("Admin creó tipo de tarea ID={} para usuario ID={}", guardado.getId(), usuarioId);
 
         return new AdminTaskTypeDetailDTO(
@@ -286,9 +293,9 @@ public class AdminUserService {
     }
 
     @Transactional
+    @PreAuthorize("hasAuthority('TASK_WRITE')")
     public AdminTaskTypeDetailDTO actualizarTipo(Long usuarioId, Long tipoTareaId, AdminUpdateTaskTypeRequest request) {
-        Usuario usuario = adminUsuarioRepository.findById(usuarioId)
-                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+        Usuario usuario = protectedUserGuard.requireMutable(usuarioId);
 
         TipoTarea tipoTarea = adminTipoTareaRepository.findByIdAndUsuarioId(tipoTareaId, usuarioId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tipo de tarea no encontrado"));
@@ -325,6 +332,7 @@ public class AdminUserService {
         }
 
         adminTipoTareaRepository.save(tipoTarea);
+        adminAuditService.success("TASK_TYPE_UPDATE", "TASK_TYPE", tipoTareaId);
         log.info("Admin actualizó tipo de tarea ID={} del usuario ID={}", tipoTareaId, usuarioId);
 
         long taskCount = adminTareaRepository.countByUsuarioIdAndTipoTareaId(usuarioId, tipoTareaId);
@@ -342,10 +350,9 @@ public class AdminUserService {
     }
 
     @Transactional
+    @PreAuthorize("hasAuthority('TASK_WRITE')")
     public void eliminarTipo(Long usuarioId, Long tipoTareaId) {
-        if (!adminUsuarioRepository.existsById(usuarioId)) {
-            throw new ResourceNotFoundException("Usuario no encontrado");
-        }
+        protectedUserGuard.requireMutable(usuarioId);
 
         TipoTarea tipoTarea = adminTipoTareaRepository.findByIdAndUsuarioId(tipoTareaId, usuarioId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tipo de tarea no encontrado"));
@@ -357,6 +364,7 @@ public class AdminUserService {
         }
 
         adminTipoTareaRepository.delete(tipoTarea);
+        adminAuditService.success("TASK_TYPE_DELETE", "TASK_TYPE", tipoTareaId);
         log.info("Admin eliminó tipo de tarea ID={} del usuario ID={}", tipoTareaId, usuarioId);
     }
 

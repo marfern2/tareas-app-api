@@ -1,6 +1,7 @@
 package com.tareas.app.auth;
 
 import com.tareas.app.admin.model.AdminUser;
+import com.tareas.app.admin.security.AdminPermission;
 import com.tareas.app.admin.repository.AdminRefreshTokenRepository;
 import com.tareas.app.admin.repository.AdminUserRepository;
 import com.tareas.app.model.Usuario;
@@ -88,6 +89,7 @@ class DisabledUserIntegrationTest {
                 .passwordHash(passwordEncoder.encode(ADMIN_PASSWORD))
                 .enabled(true)
                 .createdAt(LocalDateTime.now())
+                .permissions(java.util.EnumSet.allOf(AdminPermission.class))
                 .build();
         return adminUserRepository.save(admin);
     }

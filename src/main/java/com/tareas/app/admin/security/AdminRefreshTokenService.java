@@ -1,9 +1,11 @@
 package com.tareas.app.admin.security;
 
 import com.tareas.app.admin.exception.AdminRefreshTokenNoValidoException;
+import com.tareas.app.admin.exception.AdminRateLimitException;
 import com.tareas.app.admin.model.AdminRefreshToken;
 import com.tareas.app.admin.model.AdminUser;
 import com.tareas.app.admin.repository.AdminRefreshTokenRepository;
+import com.tareas.app.admin.repository.AdminUserRepository;
 import com.tareas.app.admin.dto.AdminRefreshResponseDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,7 +30,9 @@ public class AdminRefreshTokenService {
     private static final int TOKEN_BYTES = 32;
 
     private final AdminRefreshTokenRepository adminRefreshTokenRepository;
+    private final AdminUserRepository adminUserRepository;
     private final AdminJwtService adminJwtService;
+    private final AdminRateLimitService rateLimitService;
 
     @Value("${jwt.admin.refresh-expiration-days:7}")
     private long refreshExpirationDays;
@@ -56,6 +60,18 @@ public class AdminRefreshTokenService {
         }
 
         String hash = sha256Hex(tokenEnClaro);
+        Long adminUserId = adminRefreshTokenRepository.findAdminUserIdByTokenHash(hash)
+                .orElseThrow(AdminRefreshTokenNoValidoException::new);
+
+        // Serialize with UPDATE admin_users (including direct maintenance SQL).
+        // Read the value from the database after acquiring the row lock so a
+        // previously loaded JPA entity cannot supply a stale enabled value.
+        boolean enabled = adminUserRepository.lockEnabledForSession(adminUserId)
+                .orElse(false);
+        if (!enabled) {
+            throw new AdminRefreshTokenNoValidoException();
+        }
+
         AdminRefreshToken entidad = adminRefreshTokenRepository.findByTokenHashParaActualizar(hash)
                 .orElseThrow(AdminRefreshTokenNoValidoException::new);
 
@@ -70,6 +86,9 @@ public class AdminRefreshTokenService {
             log.warn("Reintento de admin refresh token expirado (admin user id={})", entidad.getAdminUser().getId());
             throw new AdminRefreshTokenNoValidoException();
         }
+
+        var admission = rateLimitService.allowRefreshAccount(entidad.getAdminUser().getId());
+        if (!admission.allowed()) throw new AdminRateLimitException(admission.retryAfterSeconds());
 
         entidad.setRevokedAt(ahora);
         adminRefreshTokenRepository.save(entidad);
@@ -113,7 +132,7 @@ public class AdminRefreshTokenService {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
-    String sha256Hex(String valor) {
+    public String sha256Hex(String valor) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(valor.getBytes(StandardCharsets.UTF_8));

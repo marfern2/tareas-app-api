@@ -1,6 +1,7 @@
 package com.tareas.app.exception;
 
 import com.tareas.app.admin.exception.AdminRefreshTokenNoValidoException;
+import com.tareas.app.admin.exception.AdminRateLimitException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -83,7 +84,7 @@ public class GlobalExceptionHandler {
             jakarta.validation.ConstraintViolationException.class
     })
     public ResponseEntity<Map<String, Object>> handleBadRequest(Exception ex) {
-        log.warn("Solicitud mal formada: {}", ex.getMessage());
+        log.warn("Solicitud mal formada");
         Map<String, Object> r = base(HttpStatus.BAD_REQUEST);
         r.put("message", "Datos no válidos");
         return new ResponseEntity<>(r, HttpStatus.BAD_REQUEST);
@@ -91,7 +92,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<Map<String, Object>> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
-        log.warn("Método HTTP no soportado: {}", ex.getMessage());
+        log.warn("Método HTTP no soportado");
         Map<String, Object> r = base(HttpStatus.METHOD_NOT_ALLOWED);
         r.put("message", "Método no permitido");
         return new ResponseEntity<>(r, HttpStatus.METHOD_NOT_ALLOWED);
@@ -99,7 +100,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<Map<String, Object>> handleNoResource(NoResourceFoundException ex) {
-        log.warn("Recurso no encontrado: {}", ex.getResourcePath());
+        log.warn("Recurso no encontrado");
         Map<String, Object> r = base(HttpStatus.NOT_FOUND);
         r.put("message", "Recurso no encontrado");
         return new ResponseEntity<>(r, HttpStatus.NOT_FOUND);
@@ -129,6 +130,14 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(r, HttpStatus.UNAUTHORIZED);
     }
 
+    @ExceptionHandler(AdminRateLimitException.class)
+    public ResponseEntity<Map<String, Object>> handleAdminRateLimit(AdminRateLimitException ex) {
+        Map<String, Object> r = base(HttpStatus.TOO_MANY_REQUESTS);
+        r.put("message", "Demasiadas solicitudes, inténtalo más tarde");
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", Long.toString(ex.getRetryAfterSeconds())).body(r);
+    }
+
     @ExceptionHandler(DisabledException.class)
     public ResponseEntity<Map<String, Object>> handleDisabled(DisabledException ex) {
         log.warn("Cuenta deshabilitada");
@@ -147,7 +156,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGeneric(Exception ex) {
-        log.error("Error inesperado", ex);
+        log.error("Error inesperado de tipo {}", ex.getClass().getSimpleName());
         Map<String, Object> r = base(HttpStatus.INTERNAL_SERVER_ERROR);
         r.put("message", "Ha ocurrido un error interno");
         return new ResponseEntity<>(r, HttpStatus.INTERNAL_SERVER_ERROR);
