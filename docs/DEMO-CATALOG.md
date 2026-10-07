@@ -1,55 +1,104 @@
-# Catálogo demo: persistencia V8
+# Catálogo demo
 
-V8 prepara el almacenamiento de un catálogo público independiente. Todavía no hay API,
-servicios de publicación, fixtures, restore ni concesión de permisos DEMO. La migración
-no copia datos reales ni inserta filas en ninguna tabla demo.
+V8 crea `demo_users`, `demo_task_types`, `demo_tasks` y `demo_catalog_control` sin
+insertar datos ni conceder permisos. La API administrativa privada usa únicamente
+las tres primeras tablas. DEV tiene V8 aplicada; PROD sigue en V7. La API pública,
+fixtures, restore y permisos reales están pendientes.
 
-## Esquema
+## Endpoints privados
 
-| Tabla | Identidad y relaciones | Estado |
+Todos los endpoints viven bajo `/api/admin/demo` y requieren un JWT administrativo.
+Un JWT Android no sirve. Los IDs de las rutas son IDs internos de tablas demo.
+Las respuestas devuelven DTOs, nunca entidades JPA ni `fixture_key`.
+
+| Recurso | Endpoints |
+| --- | --- |
+| Usuarios | `GET /users`, `GET /users/{id}`, `POST /users`, `PATCH /users/{id}`, `PATCH /users/{id}/publication` |
+| Tipos | `GET /task-types`, `GET /task-types/{id}`, `POST /task-types`, `PATCH /task-types/{id}`, `DELETE /task-types/{id}`, `PATCH /task-types/{id}/publication` |
+| Tareas | `GET /tasks`, `GET /tasks/{id}`, `POST /tasks`, `PATCH /tasks/{id}`, `DELETE /tasks/{id}`, `PATCH /tasks/{id}/publication` |
+| Estadísticas | `GET /stats` |
+
+`GET /stats` devuelve `usersTotal`, `usersPublished`, `typesTotal`, `typesPublished`,
+`tasksTotal`, `tasksPublished` y `tasksCompleted`, exclusivamente desde tablas demo.
+No existe `DELETE /users/{id}`.
+
+| Permiso | Operaciones |
+| --- | --- |
+| `DEMO_READ` | Todos los GET anteriores |
+| `DEMO_WRITE` | POST y PATCH de edición; DELETE de tipos y tareas |
+| `DEMO_PUBLISH` | Solo PATCH de `/publication` |
+| `DEMO_RESTORE` | Reservado, sin endpoint |
+
+Los permisos no se heredan entre sí. `ADMIN_READ`, `USER_WRITE`, `USER_DELETE` y
+`TASK_WRITE` no dan acceso al catálogo demo. La cadena de seguridad y los servicios
+comprueban los permisos de forma independiente. Esta fase no asigna permisos DEMO
+a ninguna cuenta.
+
+## DTOs, listas y validación
+
+`POST` requiere todos los campos obligatorios; `PATCH` admite solo los campos
+presentes. Los IDs de relación son obligatorios al crear y no se pueden cambiar
+después. Los campos de texto se recortan y rechazan HTML, URLs externas y
+caracteres de control. Un campo opcional omitido no se cambia; `null` en un PATCH
+tampoco borra su valor.
+
+| Recurso | Restricciones |
+| --- | --- |
+| Usuario | `handle` normalizado a minúsculas, único, 3–40 caracteres ASCII (`a-z`, `0-9`, `_`, `-`); `displayName` 2–80; `bio` hasta 500 |
+| Tipo | `demoUserId` obligatorio; `name` 2–50; `description` hasta 500; `color` `#RRGGBB` |
+| Tarea | `demoUserId`, `demoTaskTypeId`, `dueDate` ISO `YYYY-MM-DD`, `completed` y `urgency` obligatorios; `title` 3–100; `description` hasta 500; `urgency` 0–2 |
+
+Las listas usan `page` desde cero y `size` de 1 a 100 (20 por defecto). `sort`
+acepta un único campo de la lista cerrada y dirección opcional, por ejemplo
+`sort=title,desc`. Se añade `id` ascendente para desempatar. Campos permitidos:
+
+| Lista | Filtros | `sort` permitido |
 | --- | --- | --- |
-| `demo_users` | `id` interno, `public_id` UUID único, `handle` normalizado y único | `DRAFT`/`PUBLISHED` |
-| `demo_task_types` | `id`, `public_id`; `demo_user_id` → `demo_users` | `DRAFT`/`PUBLISHED` |
-| `demo_tasks` | `id`, `public_id`; `demo_user_id` → `demo_users`; (`demo_task_type_id`, `demo_user_id`) → `demo_task_types` | `DRAFT`/`PUBLISHED` |
-| `demo_catalog_control` | fila singleton opcional (`id = 1`), `revision` con bloqueo optimista | inicialmente vacía |
+| Usuarios | `search` sobre handle/displayName, `publicationStatus` | `id`, `handle`, `displayName`, `createdAt`, `updatedAt`, `publicationStatus` |
+| Tipos | `demoUserId`, `search` sobre name, `publicationStatus` | `id`, `name`, `createdAt`, `updatedAt`, `publicationStatus` |
+| Tareas | `demoUserId`, `demoTaskTypeId`, `completed`, `urgency`, `publicationStatus`, `search` sobre title | `id`, `title`, `dueDate`, `urgency`, `completed`, `createdAt`, `updatedAt`, `publicationStatus` |
 
-La FK compuesta impide que una tarea use un tipo perteneciente a otro demo user,
-incluso si se escribe SQL directamente. Ninguna tabla demo referencia `usuarios`,
-`tipos_tarea`, `tareas` o tablas administrativas, y ninguna tabla real referencia
-las tablas demo. Las entidades JPA viven en `com.tareas.app.demo`; las referencias
-entre ellas son IDs escalares, validados por PostgreSQL.
+La búsqueda ignora mayúsculas y trata `%` y `_` como texto literal.
 
-`fixture_key` es opcional y único cuando existe, por tabla. `public_id` es único y
-obligatorio. Los estados se guardan como texto con `CHECK`; `PUBLISHED` requiere
-`published_at`. El `handle` admite solo minúsculas ASCII, dígitos, `_` y `-`,
-comienza por letra o dígito y mide de 3 a 40 caracteres. Los campos `version` y
-`revision` se usan con `@Version`. `created_at` y `updated_at` usan `timestamptz`.
-No hay email, contraseña ni credenciales en el catálogo.
+## Publicación y concurrencia
 
-Los índices únicos cubren `public_id`, `handle` y `fixture_key`. Los índices de
-lectura cubren `(publication_status, handle)` para usuarios,
-`(demo_user_id, publication_status, name)` para tipos y
-`(demo_user_id, publication_status, due_date, id)` para tareas. Un índice en
-`(demo_task_type_id, demo_user_id)` apoya la FK compuesta y consultas por tipo.
-`completed` y `urgency` se filtran después de acotar por usuario y estado;
-se evitaron índices adicionales hasta tener consultas y cardinalidad reales.
+`PATCH .../publication` recibe `{"publicationStatus":"PUBLISHED"}` o
+`{"publicationStatus":"DRAFT"}`. Publicar un tipo exige que su usuario esté
+publicado. Publicar una tarea exige usuario y tipo publicados y que el tipo
+pertenezca a ese usuario. Despublicar un usuario se bloquea si alguno de sus
+tipos o tareas está publicado; despublicar un tipo se bloquea si tiene tareas
+publicadas. Borrar un tipo con tareas asociadas responde 409.
 
-## Compatibilidad
+Cada lectura individual y respuesta de creación o mutación devuelve un ETag fuerte
+de formato `"vN"`, donde `N` es el campo `version` del recurso. Cada PATCH,
+DELETE o cambio de publicación requiere `If-Match: "vN"`. Falta de cabecera
+responde 428, formato incorrecto 400 y versión obsoleta 412. Los servicios bloquean
+en orden usuario, tipo y tarea dentro de transacciones para serializar cambios
+de relaciones y publicación; la columna `@Version` también protege las escrituras.
+El orden de bloqueo evita que se publique una tarea mientras se despublica su
+tipo o usuario. Los GET de listas y estadísticas no representan una instantánea
+atómica de todo el catálogo.
 
-V8 amplía `ck_admin_permission` para aceptar los cuatro valores DEMO y conserva
-los cuatro permisos anteriores. No concede ninguno. V1–V7 permanecen inmutables.
-La migración se prueba desde una base vacía, V4 y V7, con PostgreSQL y
-`hibernate.ddl-auto=validate`.
+## Errores y auditoría
 
-La imagen/código bridge que ya reconoce `DEMO_READ`, `DEMO_WRITE`, `DEMO_PUBLISH`
-y `DEMO_RESTORE` es el rollback mínimo seguro. Flyway del bridge tolera V8
-aplicada y Hibernate ignora las tablas adicionales. Una versión anterior al
-bridge deja de ser segura en cuanto exista cualquier fila DEMO en
-`admin_permissions`, porque su enum no reconoce esos valores. El rollback no
-revierte V8 ni elimina datos.
+La API devuelve 400 para datos inválidos, 401 sin autenticación administrativa,
+403 sin el permiso DEMO específico, 404 si falta un recurso, 409 para conflictos
+de unicidad o relación, 412 para ETag obsoleto y 428 si falta `If-Match`.
+Las respuestas siguen el formato del `GlobalExceptionHandler` existente.
 
-## Siguiente fase
+Cada mutación correcta escribe `admin_audit_events` en la misma transacción.
+Las solicitudes de mutación fallidas se auditan en una transacción independiente.
+Se guardan ID del actor administrativo cuando existe, operación, tipo e ID del
+recurso, resultado, fecha y un `X-Request-ID` válido cuando se envía. No se
+guardan cuerpos, tokens ni contenido de los campos demo.
 
-Definir operaciones de lectura y escritura del catálogo, transiciones de
-publicación y autorización DEMO. El restore y los fixtures requieren una fase
-posterior con reglas y auditoría explícitas.
+## Persistencia y compatibilidad
+
+La FK compuesta `(demo_task_type_id, demo_user_id)` de `demo_tasks` impide asociar
+tipos de otro usuario. Las tablas demo no referencian `usuarios`, `tipos_tarea`
+ni `tareas`. `fixture_key` permanece opcional para una fase posterior y no se
+expone por la API. V8 amplió `ck_admin_permission` para reconocer los cuatro
+permisos DEMO, sin concederlos. V1–V8 permanecen inmutables.
+
+La imagen bridge que reconoce DEMO es el rollback mínimo seguro para DEV cuando
+V8 ya está aplicada. El restore y los fixtures requieren una fase posterior.
