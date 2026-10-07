@@ -28,7 +28,7 @@ Flyway crea una base vacia desde V1. El backend queda en 127.0.0.1:8080 y Postgr
 docker compose -f compose.dev.yaml --env-file .env up -d
 ```
 
-El seed solo se ejecuta con perfil `dev` y `DEV_SEED_ENABLED=true`. Es idempotente y exige contraseñas inyectadas por `.env`; nunca se activa en PROD. La cuenta de demostración, si se habilita, es exclusiva de DEV.
+El seed solo se ejecuta con perfil `dev` y `DEV_SEED_ENABLED=true`. Es idempotente y exige contraseñas inyectadas por `.env`; nunca se activa en PROD. La cuenta de demostración, si se habilita, es exclusiva de DEV. Con fixtures antiguos sin clave de procedencia, el seeder omite todo el seed y el backend arranca. Seguir la [adopción explícita y verificación DEV](DEV-FIXTURE-PROTECTION.md) para activar la protección.
 
 ## Migraciones y rollback
 

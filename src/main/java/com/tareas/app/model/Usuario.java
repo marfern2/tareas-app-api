@@ -36,4 +36,8 @@ public class Usuario {
     @Column(name = "protected_from_admin_mutation", nullable = false)
     @Builder.Default
     private Boolean protectedFromAdminMutation = false;
+
+    // Solo el seeder DEV (o una adopcion operativa verificada) asigna esta marca.
+    @Column(name = "dev_fixture_key", unique = true, length = 80)
+    private String devFixtureKey;
 }
