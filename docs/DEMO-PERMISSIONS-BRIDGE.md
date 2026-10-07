@@ -15,11 +15,9 @@ imagen ya podrá leerlos si hay que revertir la aplicación.
 
 ## Estado de PostgreSQL
 
-V5 contiene `ck_admin_permission`, que admite solo `ADMIN_READ`, `USER_WRITE`,
-`USER_DELETE` y `TASK_WRITE`. V1–V7 permanecen inmutables; esta fase no añade V8
-ni cambia el CHECK. Por tanto, los permisos DEMO todavía **no se pueden
-persistir** en las bases DEV V7 ni PROD V4→V7. Las pruebas simulan la ampliación
-futura del CHECK solo en un contenedor PostgreSQL desechable.
+V5 contiene `ck_admin_permission` con los cuatro valores históricos. V8 amplía
+ese CHECK para los cuatro valores DEMO sin insertar permisos. V1–V7 permanecen
+inmutables. El esquema y sus pruebas se describen en [DEMO-CATALOG.md](DEMO-CATALOG.md).
 
 `DevDataSeeder` enumera explícitamente los cuatro permisos administrativos
 históricos al crear cuentas DEV. Su comportamiento anterior se conserva sin
@@ -50,12 +48,11 @@ de rollback mientras existan filas DEMO. Si una API demo futura escribe datos,
 revertir a la imagen puente dejará esas rutas inaccesibles, pero conservará las
 filas y permitirá autenticar administradores con permisos DEMO.
 
-## Comprobaciones pendientes para V8
+## Comprobaciones de V8
 
-- Diseñar y probar la ampliación del CHECK sin alterar V5 ni perder permisos
-  existentes; verificar la secuencia DEV V7→V8 y PROD V4→V8.
-- Probar Flyway y Hibernate con la **migración V8 real**. La prueba actual solo
-  simula su esquema final y mantiene el historial de Flyway en V7.
+- La ampliación real del CHECK se prueba sin alterar V5 ni perder permisos
+  existentes, con secuencias V7→V8 y V4→V8.
+- Flyway y Hibernate `validate` se prueban con la migración V8 real.
 - Mantener la concesión de permisos como operación explícita y auditable;
   revisar que ninguna ruta sobre `usuarios`, `tareas` o `tipos_tarea` acepte
   autoridades DEMO.
