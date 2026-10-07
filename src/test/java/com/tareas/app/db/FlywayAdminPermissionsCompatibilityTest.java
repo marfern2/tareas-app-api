@@ -4,6 +4,7 @@ import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -15,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers
 class FlywayAdminPermissionsCompatibilityTest {
@@ -42,6 +44,7 @@ class FlywayAdminPermissionsCompatibilityTest {
         Flyway flyway = Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load();
         flyway.migrate();
         flyway.validate();
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
 
         assertThat(jdbc.queryForObject("SELECT revoked_at IS NOT NULL FROM admin_refresh_tokens "
                 + "WHERE token_hash = 'disabled-before-v6'", Boolean.class)).isTrue();
@@ -49,6 +52,11 @@ class FlywayAdminPermissionsCompatibilityTest {
         assertThat(jdbc.queryForList("SELECT permission FROM admin_permissions WHERE admin_user_id = "
                 + "(SELECT id FROM admin_users WHERE username='legacy') ORDER BY permission", String.class))
                 .containsExactly("ADMIN_READ", "TASK_WRITE", "USER_DELETE", "USER_WRITE");
+        assertThat(jdbc.queryForList("SELECT DISTINCT permission FROM admin_permissions ORDER BY permission", String.class))
+                .containsExactly("ADMIN_READ", "TASK_WRITE", "USER_DELETE", "USER_WRITE");
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO admin_permissions (admin_user_id, permission) "
+                + "SELECT id, 'DEMO_READ' FROM admin_users WHERE username='legacy'"))
+                .isInstanceOf(DataIntegrityViolationException.class);
         jdbc.update("INSERT INTO admin_users (username, email, password_hash) VALUES (?, ?, ?)",
                 "new", "new@example.invalid", "hash");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM admin_permissions WHERE admin_user_id = "

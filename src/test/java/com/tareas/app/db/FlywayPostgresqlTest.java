@@ -8,6 +8,7 @@ import com.tareas.app.admin.security.AdminRefreshTokenService;
 import com.tareas.app.admin.service.AdminAuthService;
 import com.tareas.app.admin.security.AdminPermission;
 import com.tareas.app.admin.security.AdminUserDetails;
+import com.tareas.app.admin.dto.AdminLoginDTO;
 import com.tareas.app.admin.service.AdminUserService;
 import com.tareas.app.exception.ResourceConflictException;
 import com.tareas.app.exception.ResourceNotFoundException;
@@ -28,6 +29,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -99,6 +101,32 @@ class FlywayPostgresqlTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Test
+    void bridgeStartsOnV7AndAuthenticatesExistingPermissionSet() {
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
+        flyway.validate();
+
+        String marker = UUID.randomUUID().toString().substring(0, 8);
+        String email = "bridge-v7-" + marker + "@example.invalid";
+        AdminUser admin = adminUserRepository.save(AdminUser.builder()
+                .username("bridge-v7-" + marker).email(email)
+                .passwordHash(new BCryptPasswordEncoder().encode("bridge-test-password"))
+                .enabled(true).createdAt(LocalDateTime.now())
+                .permissions(EnumSet.of(AdminPermission.ADMIN_READ, AdminPermission.USER_WRITE,
+                        AdminPermission.USER_DELETE, AdminPermission.TASK_WRITE)).build());
+
+        AdminLoginDTO login = new AdminLoginDTO();
+        login.setEmail(email);
+        login.setPassword("bridge-test-password");
+        assertThat(adminAuthService.login(login).getToken()).isNotBlank();
+        assertThat(adminUserRepository.findById(admin.getId()).orElseThrow().getPermissions())
+                .containsExactlyInAnyOrder(AdminPermission.ADMIN_READ, AdminPermission.USER_WRITE,
+                        AdminPermission.USER_DELETE, AdminPermission.TASK_WRITE);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM admin_permissions "
+                + "WHERE admin_user_id = ? AND permission LIKE 'DEMO_%'", Integer.class, admin.getId()))
+                .isZero();
+    }
 
     @Test
     void disablingAdminRevokesAllSessionsWithoutChangingPermissionsOrAudit() {
