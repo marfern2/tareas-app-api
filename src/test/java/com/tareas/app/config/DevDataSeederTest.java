@@ -2,6 +2,7 @@ package com.tareas.app.config;
 
 import com.tareas.app.admin.model.AdminUser;
 import com.tareas.app.admin.repository.AdminUserRepository;
+import com.tareas.app.admin.security.AdminPermission;
 import com.tareas.app.model.Tarea;
 import com.tareas.app.model.TipoTarea;
 import com.tareas.app.model.Usuario;
@@ -38,6 +39,23 @@ class DevDataSeederTest {
     private static final String PRIVATE_PASSWORD_FROM_ENV = "private-value-from-test-env";
     private static final String DEMO_PASSWORD_FROM_ENV = "demo-value-from-test-env";
     private static final String USER_PASSWORD_FROM_ENV = "user-value-from-test-env";
+
+    @Test
+    void nuevosAdministradoresDevRecibenSoloLosCuatroPermisosHistoricos() {
+        Fixture fixture = new Fixture();
+
+        fixture.seeder().run(null);
+
+        for (AdminUser admin : fixture.adminsByEmail.values()) {
+            assertThat(admin.getPermissions()).containsExactlyInAnyOrder(
+                    AdminPermission.ADMIN_READ, AdminPermission.USER_WRITE,
+                    AdminPermission.USER_DELETE, AdminPermission.TASK_WRITE);
+            assertThat(admin.getPermissions()).doesNotContain(
+                    AdminPermission.DEMO_READ, AdminPermission.DEMO_WRITE,
+                    AdminPermission.DEMO_PUBLISH, AdminPermission.DEMO_RESTORE);
+        }
+        assertThat(fixture.adminsByEmail).hasSize(2).containsKeys(PRIVATE_EMAIL, DEMO_EMAIL);
+    }
 
     @Test
     void seedEsIdempotenteYNoDuplicaDatos() {

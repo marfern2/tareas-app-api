@@ -168,7 +168,8 @@ public class DevDataSeeder implements ApplicationRunner {
                 .passwordHash(passwordEncoder.encode(password))
                 .enabled(true)
                 .createdAt(LocalDateTime.now())
-                .permissions(EnumSet.allOf(AdminPermission.class))
+                .permissions(EnumSet.of(AdminPermission.ADMIN_READ, AdminPermission.USER_WRITE,
+                        AdminPermission.USER_DELETE, AdminPermission.TASK_WRITE))
                 .build());
     }
 
