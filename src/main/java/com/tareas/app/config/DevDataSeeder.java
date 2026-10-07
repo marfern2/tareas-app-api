@@ -77,6 +77,16 @@ public class DevDataSeeder implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
+        // El DEV existente ejecuta el seeder en cada arranque. Una coincidencia
+        // anterior a V7 no debe impedir que el backend arranque ni ser adoptada.
+        if (!fixtureReady("alex-demo", "alex@example.invalid")
+                || !fixtureReady("sam-demo", "sam@example.invalid")
+                || !fixtureReady("disabled-demo", "disabled@example.invalid")) {
+            log.warn("DEV fixture seed omitido: procedencia ausente o identidad en conflicto; "
+                    + "requiere adopcion explicita. No se modifican usuarios ni admins");
+            return;
+        }
+
         requireSecret("DEV_ADMIN_USERNAME", adminUsername);
         requireSecret("DEV_ADMIN_EMAIL", adminEmail);
         requireSecret("DEV_DEMO_USERNAME", demoUsername);
@@ -90,9 +100,9 @@ public class DevDataSeeder implements ApplicationRunner {
             throw new IllegalStateException("El admin privado y la demo DEV deben ser cuentas distintas");
         }
 
-        Usuario alex = seedUser("alex-demo", "alex@example.invalid", true);
-        Usuario sam = seedUser("sam-demo", "sam@example.invalid", true);
-        seedUser("disabled-demo", "disabled@example.invalid", false);
+        Usuario alex = seedUser("alex-demo", "alex@example.invalid", true, false);
+        Usuario sam = seedUser("sam-demo", "sam@example.invalid", true, true);
+        seedUser("disabled-demo", "disabled@example.invalid", false, true);
 
         TipoTarea trabajo = seedType(alex, "Trabajo", "Proyectos y seguimiento profesional", "#4F46E5");
         TipoTarea personal = seedType(alex, "Personal", "Organizacion personal ficticia", "#16A34A");
@@ -113,6 +123,19 @@ public class DevDataSeeder implements ApplicationRunner {
                 "Actividad ficticia completada", LocalDate.now().minusDays(5), true, 0);
 
         log.info("DEV seed verificado de forma idempotente (sin mostrar credenciales)");
+    }
+
+    private boolean fixtureReady(String username, String email) {
+        String fixtureKey = "donit-dev-seed:v1:" + username;
+        Optional<Usuario> byKey = usuarios.findByDevFixtureKey(fixtureKey);
+        Optional<Usuario> byUsername = usuarios.findByUsername(username);
+        Optional<Usuario> byEmail = usuarios.findByEmail(email);
+        if (byKey.isEmpty()) {
+            return byUsername.isEmpty() && byEmail.isEmpty();
+        }
+        Long fixtureId = byKey.get().getId();
+        return (byUsername.isEmpty() || Objects.equals(fixtureId, byUsername.get().getId()))
+                && (byEmail.isEmpty() || Objects.equals(fixtureId, byEmail.get().getId()));
     }
 
     private AdminUser createAdminIfMissing(String username, String email, String password, String accountKind) {
@@ -149,21 +172,28 @@ public class DevDataSeeder implements ApplicationRunner {
                 .build());
     }
 
-    private Usuario seedUser(String username, String email, boolean enabled) {
+    private Usuario seedUser(String username, String email, boolean enabled, boolean protectedFromAdminMutation) {
+        String fixtureKey = "donit-dev-seed:v1:" + username;
+        Optional<Usuario> byKey = usuarios.findByDevFixtureKey(fixtureKey);
         Optional<Usuario> byUsername = usuarios.findByUsername(username);
         Optional<Usuario> byEmail = usuarios.findByEmail(email);
-        if (byUsername.isPresent() && byEmail.isPresent()
-                && !Objects.equals(byUsername.get().getId(), byEmail.get().getId())) {
-            throw new IllegalStateException("Conflicto de identidad en usuario ficticio DEV");
-        }
-        if (byUsername.isPresent()) {
-            if (!email.equals(byUsername.get().getEmail())) {
-                throw new IllegalStateException("Username ficticio DEV pertenece a otro email");
+        if (byKey.isPresent()) {
+            Usuario fixture = byKey.get();
+            // QA puede cambiar la identidad visible de alex. La marca permanece
+            // ligada al ID; los nombres originales no deben pertenecer a otro usuario.
+            if ((byUsername.isPresent() && !Objects.equals(fixture.getId(), byUsername.get().getId()))
+                    || (byEmail.isPresent() && !Objects.equals(fixture.getId(), byEmail.get().getId()))) {
+                throw new IllegalStateException("Conflicto de identidad en fixture DEV marcado: " + fixtureKey);
             }
-            return byUsername.get();
+            if (!Objects.equals(fixture.getProtectedFromAdminMutation(), protectedFromAdminMutation)) {
+                fixture.setProtectedFromAdminMutation(protectedFromAdminMutation);
+                return usuarios.save(fixture);
+            }
+            return fixture;
         }
-        if (byEmail.isPresent()) {
-            throw new IllegalStateException("Email ficticio DEV pertenece a otro username");
+        if (byUsername.isPresent() || byEmail.isPresent()) {
+            throw new IllegalStateException("Fixture DEV existente sin procedencia demostrable: " + username
+                    + ". Requiere adopcion explicita antes de activar el seed");
         }
         return usuarios.save(
                 Usuario.builder()
@@ -171,6 +201,8 @@ public class DevDataSeeder implements ApplicationRunner {
                         .email(email)
                         .password(passwordEncoder.encode(userPassword))
                         .enabled(enabled)
+                        .devFixtureKey(fixtureKey)
+                        .protectedFromAdminMutation(protectedFromAdminMutation)
                         .build()
             );
     }

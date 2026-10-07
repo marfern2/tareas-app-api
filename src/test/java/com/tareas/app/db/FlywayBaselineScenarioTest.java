@@ -3,6 +3,7 @@ package com.tareas.app.db;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -12,6 +13,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -37,7 +40,7 @@ class FlywayBaselineScenarioTest {
 
     @Test
     @DisplayName("Schema existente sin historial: baseline v1 sin reejecutar V1 ni perder datos")
-    void baselineSobreSchemaExistente() throws IOException {
+    void baselineSobreSchemaExistente(@TempDir Path oldMigrations) throws IOException {
         DriverManagerDataSource dataSource = new DriverManagerDataSource(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
@@ -65,10 +68,10 @@ class FlywayBaselineScenarioTest {
 
         flyway.migrate();
 
-        // 4. Historia: BASELINE v1 + SQL V2 a V6 (el baseline salta V1).
+        // 4. Historia: BASELINE v1 + SQL V2 a V7 (el baseline salta V1).
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertThat(history).hasSize(6);
+        assertThat(history).hasSize(7);
         assertThat(history.get(0).get("version")).isEqualTo("1");
         assertThat(history.get(0).get("type")).isEqualTo("BASELINE");
         assertThat(history.get(0).get("success")).isEqualTo(true);
@@ -85,6 +88,8 @@ class FlywayBaselineScenarioTest {
         assertThat(history.get(4).get("success")).isEqualTo(true);
         assertThat(history.get(5).get("version")).isEqualTo("6");
         assertThat(history.get(5).get("success")).isEqualTo(true);
+        assertThat(history.get(6).get("version")).isEqualTo("7");
+        assertThat(history.get(6).get("success")).isEqualTo(true);
 
         // 5. No quedan migraciones pendientes
         assertThat(flyway.info().pending()).isEmpty();
@@ -93,6 +98,8 @@ class FlywayBaselineScenarioTest {
         Integer countUsuarios = jdbc.queryForObject(
                 "SELECT count(*) FROM usuarios WHERE username='prodexistente'", Integer.class);
         assertThat(countUsuarios).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "SELECT dev_fixture_key FROM usuarios WHERE username='prodexistente'", String.class)).isNull();
         Integer countTipos = jdbc.queryForObject("SELECT count(*) FROM tipos_tarea", Integer.class);
         assertThat(countTipos).isEqualTo(1);
 
@@ -106,6 +113,32 @@ class FlywayBaselineScenarioTest {
         assertThat(tables).containsExactly(
                 "admin_audit_events", "admin_permissions", "admin_refresh_tokens", "admin_users",
                 "refresh_tokens", "tareas", "tipos_tarea", "usuarios");
+
+        // Un binario anterior (con solo V1-V6) debe tolerar V7 ya aplicada.
+        String[] previousFiles = {
+                "V1__baseline_schema.sql", "V2__refresh_tokens.sql", "V3__admin_auth.sql",
+                "V4__add_enabled_to_usuarios.sql", "V5__admin_permissions_and_audit.sql",
+                "V6__revoke_disabled_admin_sessions.sql"
+        };
+        for (String file : previousFiles) {
+            try (InputStream source = getClass().getResourceAsStream("/db/migration/" + file)) {
+                assertThat(source).isNotNull();
+                Files.copy(source, oldMigrations.resolve(file));
+            }
+        }
+        Flyway previousImageFlyway = Flyway.configure()
+                .dataSource(dataSource)
+                .locations("filesystem:" + oldMigrations.toAbsolutePath())
+                .baselineOnMigrate(true)
+                .baselineVersion("1")
+                .load();
+        previousImageFlyway.migrate();
+
+        // El modelo anterior inserta sin conocer dev_fixture_key.
+        jdbc.update("INSERT INTO usuarios (username, email, password) VALUES (?, ?, ?)",
+                "old-image", "old-image@example.invalid", "hash");
+        assertThat(jdbc.queryForObject("SELECT dev_fixture_key FROM usuarios WHERE username='old-image'",
+                String.class)).isNull();
     }
 
     private String readV1Sql() throws IOException {

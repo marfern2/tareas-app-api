@@ -288,6 +288,42 @@ class AdminSecurityV2IntegrationTest {
     }
 
     @Test
+    void devFixturePolicyAllowsAlexAndBlocksSamAndDisabled() throws Exception {
+        Usuario alex = users.save(Usuario.builder().username("alex-demo").email("alex@example.invalid")
+                .password("hash").devFixtureKey("donit-dev-seed:v1:alex-demo")
+                .protectedFromAdminMutation(false).build());
+        Usuario sam = users.save(Usuario.builder().username("sam-demo").email("sam@example.invalid")
+                .password("hash").devFixtureKey("donit-dev-seed:v1:sam-demo")
+                .protectedFromAdminMutation(true).build());
+        Usuario disabled = users.save(Usuario.builder().username("disabled-demo")
+                .email("disabled@example.invalid").password("hash").enabled(false)
+                .devFixtureKey("donit-dev-seed:v1:disabled-demo")
+                .protectedFromAdminMutation(true).build());
+        String jwt = token(admin(EnumSet.allOf(AdminPermission.class)));
+
+        mvc.perform(patch("/api/admin/users/{id}", alex.getId())
+                .header("Authorization", "Bearer " + jwt).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"alex-qa\"}"))
+                .andExpect(status().isOk());
+        for (Usuario protectedFixture : java.util.List.of(sam, disabled)) {
+            mvc.perform(patch("/api/admin/users/{id}", protectedFixture.getId())
+                    .header("Authorization", "Bearer " + jwt).contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"username\":\"changed\"}"))
+                    .andExpect(status().isConflict());
+            mvc.perform(delete("/api/admin/users/{id}", protectedFixture.getId())
+                    .header("Authorization", "Bearer " + jwt))
+                    .andExpect(status().isConflict());
+        }
+
+        assertThat(users.findById(alex.getId()).orElseThrow().getUsername()).isEqualTo("alex-qa");
+        assertThat(users.findById(sam.getId()).orElseThrow().getUsername()).isEqualTo("sam-demo");
+        assertThat(users.findById(disabled.getId()).orElseThrow().getEnabled()).isFalse();
+        assertThat(audit.findAll()).hasSize(5);
+        assertThat(audit.findAll().stream().filter(event -> "FAILURE".equals(event.getOutcome())))
+                .hasSize(4);
+    }
+
+    @Test
     void authorizedDeleteRemovesUserTasksTypesAndSessionsWithAudit() throws Exception {
         Usuario user = user(false);
         TipoTarea type = types.save(TipoTarea.builder().nombre("Type").color("#123456").usuario(user).build());
