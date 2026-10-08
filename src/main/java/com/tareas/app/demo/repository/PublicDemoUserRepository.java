@@ -12,19 +12,32 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface PublicDemoUserRepository extends Repository<DemoUser, Long> {
+    default Page<PublicDemoUser> visible(String search, Pageable pageable) {
+        return search == null ? visibleWithoutSearch(pageable) : visibleWithSearch(search, pageable);
+    }
+
+    @Query(value = """
+            select new com.tareas.app.demo.dto.publicapi.PublicDemoDtos$PublicDemoUser(
+              u.publicId, u.handle, u.displayName, u.bio)
+            from DemoUser u where u.publicationStatus = 'PUBLISHED'
+            """, countQuery = """
+            select count(u) from DemoUser u where u.publicationStatus = 'PUBLISHED'
+            """)
+    Page<PublicDemoUser> visibleWithoutSearch(Pageable pageable);
+
     @Query(value = """
             select new com.tareas.app.demo.dto.publicapi.PublicDemoDtos$PublicDemoUser(
               u.publicId, u.handle, u.displayName, u.bio)
             from DemoUser u
             where u.publicationStatus = 'PUBLISHED'
-              and (:search is null or lower(u.handle) like concat('%', :search, '%') escape '!'
+              and (lower(u.handle) like concat('%', :search, '%') escape '!'
                 or lower(u.displayName) like concat('%', :search, '%') escape '!')
             """, countQuery = """
             select count(u) from DemoUser u where u.publicationStatus = 'PUBLISHED'
-              and (:search is null or lower(u.handle) like concat('%', :search, '%') escape '!'
+              and (lower(u.handle) like concat('%', :search, '%') escape '!'
                 or lower(u.displayName) like concat('%', :search, '%') escape '!')
             """)
-    Page<PublicDemoUser> visible(@Param("search") String search, Pageable pageable);
+    Page<PublicDemoUser> visibleWithSearch(@Param("search") String search, Pageable pageable);
 
     @Query("""
             select new com.tareas.app.demo.dto.publicapi.PublicDemoDtos$PublicDemoUser(

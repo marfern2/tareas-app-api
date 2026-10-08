@@ -12,21 +12,40 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface PublicDemoTaskTypeRepository extends Repository<DemoTaskType, Long> {
+    default Page<PublicDemoTaskType> visible(UUID userPublicId, String search, Pageable pageable) {
+        return search == null ? visibleWithoutSearch(userPublicId, pageable)
+                : visibleWithSearch(userPublicId, search, pageable);
+    }
+
     @Query(value = """
             select new com.tareas.app.demo.dto.publicapi.PublicDemoDtos$PublicDemoTaskType(
               t.publicId, u.publicId, t.name, t.description, t.color)
             from DemoTaskType t join DemoUser u on u.id = t.demoUserId
             where t.publicationStatus = 'PUBLISHED' and u.publicationStatus = 'PUBLISHED'
               and (:userPublicId is null or u.publicId = :userPublicId)
-              and (:search is null or lower(t.name) like concat('%', :search, '%') escape '!')
             """, countQuery = """
             select count(t) from DemoTaskType t join DemoUser u on u.id = t.demoUserId
             where t.publicationStatus = 'PUBLISHED' and u.publicationStatus = 'PUBLISHED'
               and (:userPublicId is null or u.publicId = :userPublicId)
-              and (:search is null or lower(t.name) like concat('%', :search, '%') escape '!')
             """)
-    Page<PublicDemoTaskType> visible(@Param("userPublicId") UUID userPublicId,
-                                     @Param("search") String search, Pageable pageable);
+    Page<PublicDemoTaskType> visibleWithoutSearch(@Param("userPublicId") UUID userPublicId,
+                                                  Pageable pageable);
+
+    @Query(value = """
+            select new com.tareas.app.demo.dto.publicapi.PublicDemoDtos$PublicDemoTaskType(
+              t.publicId, u.publicId, t.name, t.description, t.color)
+            from DemoTaskType t join DemoUser u on u.id = t.demoUserId
+            where t.publicationStatus = 'PUBLISHED' and u.publicationStatus = 'PUBLISHED'
+              and (:userPublicId is null or u.publicId = :userPublicId)
+              and lower(t.name) like concat('%', :search, '%') escape '!'
+            """, countQuery = """
+            select count(t) from DemoTaskType t join DemoUser u on u.id = t.demoUserId
+            where t.publicationStatus = 'PUBLISHED' and u.publicationStatus = 'PUBLISHED'
+              and (:userPublicId is null or u.publicId = :userPublicId)
+              and lower(t.name) like concat('%', :search, '%') escape '!'
+            """)
+    Page<PublicDemoTaskType> visibleWithSearch(@Param("userPublicId") UUID userPublicId,
+                                               @Param("search") String search, Pageable pageable);
 
     @Query("""
             select new com.tareas.app.demo.dto.publicapi.PublicDemoDtos$PublicDemoTaskType(
