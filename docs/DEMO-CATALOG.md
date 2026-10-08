@@ -2,8 +2,57 @@
 
 V8 crea `demo_users`, `demo_task_types`, `demo_tasks` y `demo_catalog_control` sin
 insertar datos ni conceder permisos. La API administrativa privada usa únicamente
-las tres primeras tablas. DEV tiene V8 aplicada; PROD sigue en V7. La API pública,
-fixtures, restore y permisos reales están pendientes.
+las tres primeras tablas. DEV tiene V8 aplicada; PROD sigue en V7. Fixtures,
+restore y permisos reales están pendientes.
+
+## API pública de solo lectura
+
+`/api/public/demo` ofrece `GET /users`, `GET /users/{publicId}`,
+`GET /task-types`, `GET /task-types/{publicId}`, `GET /tasks`,
+`GET /tasks/{publicId}` y `GET /stats`. La cadena de seguridad pública permite
+únicamente GET, sin autenticación; ignora cualquier cabecera `Authorization`.
+POST, PUT, PATCH, DELETE y OPTIONS reciben 403. La cadena administrativa y sus
+permisos siguen separados. Las respuestas usan `Cache-Control: no-store`; no hay
+ETag público porque una lista y sus padres pueden cambiar entre peticiones.
+
+Las respuestas públicas usan DTOs separados en `demo.dto.publicapi`, con nombres
+JSON camelCase según la convención actual. `publicId` es la única clave de cada
+recurso; las rutas de detalle reciben UUID, no IDs SQL. Los campos son:
+
+| DTO | Campos |
+| --- | --- |
+| `PublicDemoUser` | `publicId`, `handle`, `displayName`, `bio` |
+| `PublicDemoTaskType` | `publicId`, `userPublicId`, `name`, `description`, `color` |
+| `PublicDemoTask` | `publicId`, `userPublicId`, `taskTypePublicId`, `title`, `description`, `dueDate`, `completed`, `urgency` |
+| `PublicDemoStats` | `users`, `taskTypes`, `tasks`, `completedTasks` |
+
+Las listas devuelven `content`, `page`, `size`, `totalElements`, `totalPages` y
+`hasNext`. `page` va de 0 a 49 y `size` de 1 a 20; los valores por defecto son
+0 y 20. `sort` acepta `campo`, `campo,asc` o `campo,desc`: usuarios `handle` o
+`displayName` (por defecto `handle,asc`), tipos `name` (por defecto `name,asc`),
+tareas `dueDate` o `title` (por defecto `dueDate,asc`). Se añade `publicId` ascendente
+como desempate estable. Parámetros, rangos y órdenes no permitidos responden 400.
+Una publicación concurrente puede cambiar el contenido entre páginas o entre los
+recuentos de `stats`; no se promete una instantánea del catálogo completo.
+
+| Lista | Filtros públicos |
+| --- | --- |
+| Usuarios | `search` sobre `handle` y `displayName` |
+| Tipos | `userPublicId`, `search` sobre `name` |
+| Tareas | `userPublicId`, `taskTypePublicId`, `completed`, `urgency`, `search` sobre `title` |
+
+`search` se recorta, requiere 2–60 caracteres y compara sin distinguir mayúsculas.
+`%` y `_` se tratan como texto literal; las consultas son parametrizadas. Cada
+recurso debe estar `PUBLISHED`. Los tipos exigen usuario publicado; las tareas
+exigen usuario y tipo publicados y tipo del mismo usuario. Estas condiciones se
+aplican también a detalles, recuentos y tareas completadas. No se consultan
+tablas reales ni se reutiliza `DemoAdminService`; no se serializan `fixture_key`,
+versiones, fechas internas, auditoría ni estado de publicación.
+
+No se ha añadido límite por IP: requiere comprobar antes la cadena
+Cloudflare/proxy y no confiar en `X-Forwarded-For` sin esa verificación. CORS
+conserva la política actual; un origen para una futura web pública requiere una
+decisión separada. Esta fase no introduce fixtures ni mutaciones públicas.
 
 ## Endpoints privados
 
