@@ -136,6 +136,19 @@ public class SecurityConfig {
 
     @Bean
     @Order(2)
+    public SecurityFilterChain publicDemoFilterChain(HttpSecurity http) throws Exception {
+        http.securityMatcher("/api/public/demo/**")
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(ex -> ex.accessDeniedHandler((request, response, denied) -> response.sendError(403)))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/public/demo/**").permitAll()
+                        .anyRequest().denyAll());
+        return http.build();
+    }
+
+    @Bean
+    @Order(3)
     public SecurityFilterChain normalFilterChain(
             HttpSecurity http,
             JwtService jwtService,

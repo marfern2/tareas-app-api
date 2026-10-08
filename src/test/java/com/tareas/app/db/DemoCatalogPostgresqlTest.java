@@ -2,6 +2,7 @@ package com.tareas.app.db;
 
 import com.tareas.app.demo.model.*;
 import com.tareas.app.demo.repository.*;
+import com.tareas.app.demo.service.PublicDemoService;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.metamodel.EntityType;
 import org.flywaydb.core.Flyway;
@@ -11,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.util.LinkedMultiValueMap;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -38,6 +40,78 @@ class DemoCatalogPostgresqlTest {
     @Autowired DemoTaskTypeRepository types;
     @Autowired DemoTaskRepository tasks;
     @Autowired DemoCatalogControlRepository control;
+    @Autowired PublicDemoService publicDemo;
+
+    @Test
+    void publicQueriesUsePostgresqlJoinsSearchAndStablePagination() {
+        var before = publicDemo.stats(new LinkedMultiValueMap<>());
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String handle = "public-" + suffix;
+        jdbc.update("""
+                INSERT INTO demo_users (handle, display_name, publication_status, published_at)
+                VALUES (?, 'Public Example', 'PUBLISHED', now())
+                """, handle);
+        long userId = jdbc.queryForObject("SELECT id FROM demo_users WHERE handle=?", Long.class, handle);
+        UUID userPublicId = jdbc.queryForObject("SELECT public_id FROM demo_users WHERE id=?", UUID.class, userId);
+        jdbc.update("""
+                INSERT INTO demo_task_types (demo_user_id, name, color, publication_status, published_at)
+                VALUES (?, 'Work', '#ABCDEF', 'PUBLISHED', now())
+                """, userId);
+        long typeId = jdbc.queryForObject("SELECT id FROM demo_task_types WHERE demo_user_id=?", Long.class, userId);
+        UUID typePublicId = jdbc.queryForObject("SELECT public_id FROM demo_task_types WHERE id=?", UUID.class, typeId);
+        jdbc.update("""
+                INSERT INTO demo_tasks (demo_user_id, demo_task_type_id, title, due_date, completed,
+                    urgency, publication_status, published_at)
+                VALUES (?, ?, 'Equal Title', CURRENT_DATE, true, 2, 'PUBLISHED', now()),
+                       (?, ?, 'Equal Title', CURRENT_DATE, false, 2, 'PUBLISHED', now())
+                """, userId, typeId, userId, typeId);
+        jdbc.update("""
+                INSERT INTO demo_tasks (demo_user_id, demo_task_type_id, title, due_date, completed,
+                    urgency, publication_status)
+                VALUES (?, ?, 'Draft Title', CURRENT_DATE, true, 2, 'DRAFT')
+                """, userId, typeId);
+        jdbc.update("INSERT INTO demo_users (handle, display_name) VALUES (?, 'Hidden Parent')", "hidden-" + suffix);
+        long hiddenUserId = jdbc.queryForObject("SELECT id FROM demo_users WHERE handle=?", Long.class,
+                "hidden-" + suffix);
+        jdbc.update("""
+                INSERT INTO demo_task_types (demo_user_id, name, color, publication_status, published_at)
+                VALUES (?, 'Hidden Work', '#ABCDEF', 'PUBLISHED', now())
+                """, hiddenUserId);
+        long hiddenTypeId = jdbc.queryForObject("SELECT id FROM demo_task_types WHERE demo_user_id=?", Long.class,
+                hiddenUserId);
+        jdbc.update("""
+                INSERT INTO demo_tasks (demo_user_id, demo_task_type_id, title, due_date, publication_status, published_at)
+                VALUES (?, ?, 'Hidden Equal', CURRENT_DATE, 'PUBLISHED', now())
+                """, hiddenUserId, hiddenTypeId);
+
+        var filter = new LinkedMultiValueMap<String, String>();
+        filter.add("userPublicId", userPublicId.toString());
+        filter.add("taskTypePublicId", typePublicId.toString());
+        filter.add("search", "eQuAl");
+        filter.add("sort", "title,asc");
+        filter.add("size", "1");
+        var first = publicDemo.tasks(filter);
+        assertThat(first.totalElements()).isEqualTo(2);
+        assertThat(first.content()).hasSize(1);
+        filter.add("page", "1");
+        var second = publicDemo.tasks(filter);
+        assertThat(second.content()).hasSize(1);
+        assertThat(second.content().getFirst().publicId()).isNotEqualTo(first.content().getFirst().publicId());
+        var after = publicDemo.stats(new LinkedMultiValueMap<>());
+        assertThat(after.tasks()).isEqualTo(before.tasks() + 2);
+        assertThat(after.taskTypes()).isEqualTo(before.taskTypes() + 1);
+        assertThat(after.users()).isEqualTo(before.users() + 1);
+        assertThat(after.completedTasks()).isEqualTo(before.completedTasks() + 1);
+        assertThat(publicDemo.task(first.content().getFirst().publicId().toString(), new LinkedMultiValueMap<>())
+                .userPublicId()).isEqualTo(userPublicId);
+        var userFilter = new LinkedMultiValueMap<String, String>();
+        userFilter.add("search", "PUBLIC EXAMPLE");
+        assertThat(publicDemo.users(userFilter).content()).anyMatch(u -> u.publicId().equals(userPublicId));
+        var typeFilter = new LinkedMultiValueMap<String, String>();
+        typeFilter.add("userPublicId", userPublicId.toString());
+        typeFilter.add("search", "wOrK");
+        assertThat(publicDemo.types(typeFilter).content()).anyMatch(t -> t.publicId().equals(typePublicId));
+    }
 
     @Test
     void v8KeepsBothContextsStructurallySeparate() {
