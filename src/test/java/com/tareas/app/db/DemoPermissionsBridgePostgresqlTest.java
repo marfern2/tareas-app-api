@@ -54,7 +54,11 @@ class DemoPermissionsBridgePostgresqlTest {
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
-        // V8 expands the CHECK; rows are inserted only in this disposable test database.
+        // Test fixture only: simulate the future expanded CHECK before Spring/Flyway/Hibernate start.
+        jdbc.execute("ALTER TABLE admin_permissions DROP CONSTRAINT ck_admin_permission");
+        jdbc.execute("ALTER TABLE admin_permissions ADD CONSTRAINT ck_admin_permission CHECK "
+                + "(permission IN ('ADMIN_READ', 'USER_WRITE', 'USER_DELETE', 'TASK_WRITE', "
+                + "'DEMO_READ', 'DEMO_WRITE', 'DEMO_PUBLISH', 'DEMO_RESTORE'))");
         jdbc.update("INSERT INTO admin_users (username, email, password_hash) VALUES (?, ?, ?)",
                 "demo-bridge", EMAIL, new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder()
                         .encode(PASSWORD));
@@ -81,7 +85,7 @@ class DemoPermissionsBridgePostgresqlTest {
     void futurePermissionRowsLoadAuthenticateAndGrantNoRealDataAccess() throws Exception {
         // Spring has already started with Flyway enabled and Hibernate ddl-auto=validate.
         flyway.validate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
 
         var admin = admins.findByEmail(EMAIL).orElseThrow();
         assertThat(admin.getPermissions()).containsExactlyInAnyOrder(

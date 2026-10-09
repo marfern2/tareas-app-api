@@ -91,30 +91,6 @@ public class SecurityConfig {
                             "/api/admin/auth/refresh",
                             "/api/admin/auth/logout"
                     ).permitAll();
-                    auth.requestMatchers(org.springframework.http.HttpMethod.GET, "/api/admin/me")
-                            .authenticated();
-                    auth.requestMatchers(org.springframework.http.HttpMethod.GET, "/api/admin/demo/fixtures/restore-preview")
-                            .hasAuthority("DEMO_RESTORE");
-                    auth.requestMatchers(org.springframework.http.HttpMethod.POST, "/api/admin/demo/fixtures/restore")
-                            .hasAuthority("DEMO_RESTORE");
-                    auth.requestMatchers(org.springframework.http.HttpMethod.GET, "/api/admin/demo/stats",
-                                    "/api/admin/demo/users", "/api/admin/demo/users/*",
-                                    "/api/admin/demo/task-types", "/api/admin/demo/task-types/*",
-                                    "/api/admin/demo/tasks", "/api/admin/demo/tasks/*")
-                            .hasAuthority("DEMO_READ");
-                    auth.requestMatchers(org.springframework.http.HttpMethod.PATCH,
-                                    "/api/admin/demo/users/*/publication", "/api/admin/demo/task-types/*/publication",
-                                    "/api/admin/demo/tasks/*/publication")
-                            .hasAuthority("DEMO_PUBLISH");
-                    auth.requestMatchers(org.springframework.http.HttpMethod.POST,
-                                    "/api/admin/demo/users", "/api/admin/demo/task-types", "/api/admin/demo/tasks")
-                            .hasAuthority("DEMO_WRITE");
-                    auth.requestMatchers(org.springframework.http.HttpMethod.PATCH,
-                                    "/api/admin/demo/users/*", "/api/admin/demo/task-types/*", "/api/admin/demo/tasks/*")
-                            .hasAuthority("DEMO_WRITE");
-                    auth.requestMatchers(org.springframework.http.HttpMethod.DELETE,
-                                    "/api/admin/demo/task-types/*", "/api/admin/demo/tasks/*")
-                            .hasAuthority("DEMO_WRITE");
                     auth.requestMatchers(org.springframework.http.HttpMethod.GET,
                                     "/api/admin/users", "/api/admin/users/*",
                                     "/api/admin/users/*/tasks", "/api/admin/users/*/task-types",
@@ -142,19 +118,6 @@ public class SecurityConfig {
 
     @Bean
     @Order(2)
-    public SecurityFilterChain publicDemoFilterChain(HttpSecurity http) throws Exception {
-        http.securityMatcher("/api/public/demo/**")
-                .csrf(csrf -> csrf.disable())
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .exceptionHandling(ex -> ex.accessDeniedHandler((request, response, denied) -> response.sendError(403)))
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/public/demo/**").permitAll()
-                        .anyRequest().denyAll());
-        return http.build();
-    }
-
-    @Bean
-    @Order(3)
     public SecurityFilterChain normalFilterChain(
             HttpSecurity http,
             JwtService jwtService,
