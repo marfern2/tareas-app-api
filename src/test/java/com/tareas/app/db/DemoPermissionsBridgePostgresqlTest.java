@@ -81,7 +81,7 @@ class DemoPermissionsBridgePostgresqlTest {
     void futurePermissionRowsLoadAuthenticateAndGrantNoRealDataAccess() throws Exception {
         // Spring has already started with Flyway enabled and Hibernate ddl-auto=validate.
         flyway.validate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
 
         var admin = admins.findByEmail(EMAIL).orElseThrow();
         assertThat(admin.getPermissions()).containsExactlyInAnyOrder(

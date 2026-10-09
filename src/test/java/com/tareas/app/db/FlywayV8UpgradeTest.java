@@ -33,7 +33,8 @@ class FlywayV8UpgradeTest {
         jdbc.update("INSERT INTO admin_permissions (admin_user_id,permission) "
                 + "SELECT id,'ADMIN_READ' FROM admin_users WHERE username='existing'");
 
-        Flyway current = Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load();
+        Flyway current = Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                .target(MigrationVersion.fromVersion("8")).load();
         assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
         current.validate();
         assertThat(current.info().current().getVersion().getVersion()).isEqualTo("8");

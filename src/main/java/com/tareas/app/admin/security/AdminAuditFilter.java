@@ -30,23 +30,32 @@ public class AdminAuditFilter extends OncePerRequestFilter {
                 String[] parts = request.getRequestURI().split("/");
                 boolean demo = parts.length > 4 && "demo".equals(parts[3]);
                 if (demo) {
-                    String type = switch (parts[4]) {
-                        case "users" -> "DEMO_USER";
-                        case "task-types" -> "DEMO_TASK_TYPE";
-                        case "tasks" -> "DEMO_TASK";
-                        default -> "UNKNOWN";
-                    };
-                    Long id = parts.length > 5 ? numeric(parts[5]) : null;
-                    String action = parts.length > 6 && "publication".equals(parts[6]) ? "PUBLICATION" : switch (request.getMethod()) {
-                        case "POST" -> "CREATE";
-                        case "PATCH" -> "UPDATE";
-                        case "DELETE" -> "DELETE";
-                        default -> "UNKNOWN";
-                    };
-                    try {
-                        audit.failure(type + "_" + action, type, id);
-                    } catch (RuntimeException ignored) {
-                        log.error("No se pudo persistir la auditoría de una solicitud demo fallida");
+                    if (parts.length > 5 && "fixtures".equals(parts[4]) && "restore".equals(parts[5])) {
+                        try {
+                            audit.fixtureRestoreFailure((Long) request.getAttribute("fixturePreviousRevision"),
+                                    (String) request.getAttribute("fixtureCounts"));
+                        } catch (RuntimeException ignored) {
+                            log.error("No se pudo persistir la auditoría de restore fallido");
+                        }
+                    } else {
+                        String type = switch (parts[4]) {
+                            case "users" -> "DEMO_USER";
+                            case "task-types" -> "DEMO_TASK_TYPE";
+                            case "tasks" -> "DEMO_TASK";
+                            default -> "UNKNOWN";
+                        };
+                        Long id = parts.length > 5 ? numeric(parts[5]) : null;
+                        String action = parts.length > 6 && "publication".equals(parts[6]) ? "PUBLICATION" : switch (request.getMethod()) {
+                            case "POST" -> "CREATE";
+                            case "PATCH" -> "UPDATE";
+                            case "DELETE" -> "DELETE";
+                            default -> "UNKNOWN";
+                        };
+                        try {
+                            audit.failure(type + "_" + action, type, id);
+                        } catch (RuntimeException ignored) {
+                            log.error("No se pudo persistir la auditoría de una solicitud demo fallida");
+                        }
                     }
                 } else {
                     String type = parts.length > 3 && "users".equals(parts[3]) ? "USER" : "UNKNOWN";
@@ -70,7 +79,8 @@ public class AdminAuditFilter extends OncePerRequestFilter {
 
     private boolean isMutation(HttpServletRequest request) {
         return (request.getRequestURI().startsWith("/api/admin/users/")
-                || request.getRequestURI().matches("/api/admin/demo/(users|task-types|tasks)(/[^/]+(/publication)?)?"))
+                || request.getRequestURI().matches("/api/admin/demo/(users|task-types|tasks)(/[^/]+(/publication)?)?")
+                || request.getRequestURI().equals("/api/admin/demo/fixtures/restore"))
                 && ("POST".equals(request.getMethod()) || "PATCH".equals(request.getMethod())
                 || "DELETE".equals(request.getMethod()));
     }

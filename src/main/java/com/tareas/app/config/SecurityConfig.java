@@ -91,6 +91,10 @@ public class SecurityConfig {
                             "/api/admin/auth/refresh",
                             "/api/admin/auth/logout"
                     ).permitAll();
+                    auth.requestMatchers(org.springframework.http.HttpMethod.GET, "/api/admin/demo/fixtures/restore-preview")
+                            .hasAuthority("DEMO_RESTORE");
+                    auth.requestMatchers(org.springframework.http.HttpMethod.POST, "/api/admin/demo/fixtures/restore")
+                            .hasAuthority("DEMO_RESTORE");
                     auth.requestMatchers(org.springframework.http.HttpMethod.GET, "/api/admin/demo/stats",
                                     "/api/admin/demo/users", "/api/admin/demo/users/*",
                                     "/api/admin/demo/task-types", "/api/admin/demo/task-types/*",

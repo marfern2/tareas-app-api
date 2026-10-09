@@ -27,6 +27,7 @@ public class DemoAdminService {
     private final DemoTaskRepository tasks;
     private final AdminAuditService audit;
     private final DemoValidation v;
+    private final DemoCatalogGuard catalogGuard;
 
     private static <T> Specification<T> eq(String property, Object value) {
         return (root, query, cb) -> value == null ? cb.conjunction() : cb.equal(root.get(property), value);
@@ -61,6 +62,7 @@ public class DemoAdminService {
     @PreAuthorize("hasAuthority('DEMO_WRITE')")
     @Transactional
     public UserView createUser(UserCreate request) {
+        catalogGuard.lock();
         String handle = v.handle(request.handle());
         if (users.existsByHandle(handle)) throw v.conflict("handle ya existe");
         DemoUser user = new DemoUser();
@@ -76,6 +78,7 @@ public class DemoAdminService {
     @PreAuthorize("hasAuthority('DEMO_WRITE')")
     @Transactional
     public UserView updateUser(Long id, long expected, UserPatch request) {
+        catalogGuard.lock();
         DemoUser user = users.lockById(id).orElseThrow(v::missing);
         v.version(expected, user.getVersion());
         if (request.handle() != null) {
@@ -94,6 +97,7 @@ public class DemoAdminService {
     @PreAuthorize("hasAuthority('DEMO_PUBLISH')")
     @Transactional
     public UserView publishUser(Long id, long expected, PublicationStatus status) {
+        catalogGuard.lock();
         v.status(status);
         DemoUser user = users.lockById(id).orElseThrow(v::missing);
         v.version(expected, user.getVersion());
@@ -121,6 +125,7 @@ public class DemoAdminService {
     @PreAuthorize("hasAuthority('DEMO_WRITE')")
     @Transactional
     public TypeView createType(TypeCreate request) {
+        catalogGuard.lock();
         requirePositive(request.demoUserId(), "demoUserId");
         users.lockById(request.demoUserId()).orElseThrow(v::missing);
         DemoTaskType type = new DemoTaskType();
@@ -136,6 +141,7 @@ public class DemoAdminService {
     @PreAuthorize("hasAuthority('DEMO_WRITE')")
     @Transactional
     public TypeView updateType(Long id, long expected, TypePatch request) {
+        catalogGuard.lock();
         DemoTaskType snapshot = types.findById(id).orElseThrow(v::missing);
         DemoUser owner = users.lockById(snapshot.getDemoUserId()).orElseThrow(v::missing);
         DemoTaskType type = types.lockById(id).orElseThrow(v::missing);
@@ -153,6 +159,7 @@ public class DemoAdminService {
     @PreAuthorize("hasAuthority('DEMO_WRITE')")
     @Transactional
     public void deleteType(Long id, long expected) {
+        catalogGuard.lock();
         DemoTaskType snapshot = types.findById(id).orElseThrow(v::missing);
         users.lockById(snapshot.getDemoUserId()).orElseThrow(v::missing);
         DemoTaskType type = types.lockById(id).orElseThrow(v::missing);
@@ -166,6 +173,7 @@ public class DemoAdminService {
     @PreAuthorize("hasAuthority('DEMO_PUBLISH')")
     @Transactional
     public TypeView publishType(Long id, long expected, PublicationStatus status) {
+        catalogGuard.lock();
         v.status(status);
         DemoTaskType snapshot = types.findById(id).orElseThrow(v::missing);
         DemoUser owner = users.lockById(snapshot.getDemoUserId()).orElseThrow(v::missing);
@@ -198,6 +206,7 @@ public class DemoAdminService {
     @PreAuthorize("hasAuthority('DEMO_WRITE')")
     @Transactional
     public TaskView createTask(TaskCreate request) {
+        catalogGuard.lock();
         requirePositive(request.demoUserId(), "demoUserId");
         requirePositive(request.demoTaskTypeId(), "demoTaskTypeId");
         users.lockById(request.demoUserId()).orElseThrow(v::missing);
@@ -219,6 +228,7 @@ public class DemoAdminService {
     @PreAuthorize("hasAuthority('DEMO_WRITE')")
     @Transactional
     public TaskView updateTask(Long id, long expected, TaskPatch request) {
+        catalogGuard.lock();
         DemoTask snapshot = tasks.findById(id).orElseThrow(v::missing);
         users.lockById(snapshot.getDemoUserId()).orElseThrow(v::missing);
         types.lockById(snapshot.getDemoTaskTypeId()).orElseThrow(v::missing);
@@ -241,6 +251,7 @@ public class DemoAdminService {
     @PreAuthorize("hasAuthority('DEMO_WRITE')")
     @Transactional
     public void deleteTask(Long id, long expected) {
+        catalogGuard.lock();
         DemoTask snapshot = tasks.findById(id).orElseThrow(v::missing);
         users.lockById(snapshot.getDemoUserId()).orElseThrow(v::missing);
         types.lockById(snapshot.getDemoTaskTypeId()).orElseThrow(v::missing);
@@ -254,6 +265,7 @@ public class DemoAdminService {
     @PreAuthorize("hasAuthority('DEMO_PUBLISH')")
     @Transactional
     public TaskView publishTask(Long id, long expected, PublicationStatus status) {
+        catalogGuard.lock();
         v.status(status);
         DemoTask snapshot = tasks.findById(id).orElseThrow(v::missing);
         DemoUser owner = users.lockById(snapshot.getDemoUserId()).orElseThrow(v::missing);

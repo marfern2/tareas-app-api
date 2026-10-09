@@ -14,6 +14,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.Instant;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -22,16 +23,25 @@ public class AdminAuditService {
 
     /** Called within the mutation transaction. An audit write failure rolls it back. */
     public void success(String operation, String resourceType, Long resourceId) {
-        save(operation, resourceType, resourceId, "SUCCESS");
+        save(operation, resourceType, resourceId, "SUCCESS", null, null, null);
+    }
+    public void fixtureRestoreSuccess(long previous, long next, String counts) {
+        save("DEMO_FIXTURE_RESTORE", "DEMO_CATALOG", 1L, "SUCCESS", previous, next, counts);
     }
 
     /** Failed requests are recorded independently after the business transaction rolls back. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void failure(String operation, String resourceType, Long resourceId) {
-        save(operation, resourceType, resourceId, "FAILURE");
+        save(operation, resourceType, resourceId, "FAILURE", null, null, null);
     }
 
-    private void save(String operation, String resourceType, Long resourceId, String outcome) {
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void fixtureRestoreFailure(Long previous, String counts) {
+        save("DEMO_FIXTURE_RESTORE", "DEMO_CATALOG", 1L, "FAILURE", previous, previous, counts);
+    }
+
+    private void save(String operation, String resourceType, Long resourceId, String outcome,
+                      Long previous, Long next, String counts) {
         AdminAuditEvent event = new AdminAuditEvent();
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.getPrincipal() instanceof AdminUserDetails details) {
@@ -42,6 +52,9 @@ public class AdminAuditService {
         event.setResourceId(resourceId);
         event.setOutcome(outcome);
         event.setOccurredAt(Instant.now());
+        event.setPreviousRevision(previous);
+        event.setNewRevision(next);
+        event.setRestoreCounts(counts);
         if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
             HttpServletRequest request = attributes.getRequest();
             String correlation = request.getHeader("X-Request-ID");
@@ -49,6 +62,8 @@ public class AdminAuditService {
                 event.setCorrelationId(correlation);
             }
         }
+        if ("DEMO_FIXTURE_RESTORE".equals(operation) && event.getCorrelationId() == null)
+            event.setCorrelationId(UUID.randomUUID().toString());
         repository.saveAndFlush(event);
     }
 }
