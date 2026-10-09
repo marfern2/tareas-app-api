@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,6 +23,10 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.EnumSet;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -33,7 +38,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = {
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.flyway.enabled=true",
         "spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect",
         "spring.jpa.hibernate.ddl-auto=validate"
@@ -54,6 +59,8 @@ class DemoFixturePostgresqlTest {
     @Autowired AdminJwtService jwt;
     @Autowired JwtService androidJwt;
     @Autowired FixtureManifest manifest;
+    @LocalServerPort int port;
+    private final HttpClient http = HttpClient.newHttpClient();
 
     @BeforeEach
     void reset() {
@@ -86,6 +93,38 @@ class DemoFixturePostgresqlTest {
         return json(mvc.perform(post(RESTORE).header("Authorization", auth).header("If-Match", etag)
                 .header("X-Request-ID", "fixture-restore-test")).andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString());
+    }
+
+    private HttpResponse<String> http(String method, String path, String auth, String ifMatch) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .header("Authorization", auth).header("Origin", "http://localhost:4200")
+                .header("Accept-Encoding", "gzip, br")
+                .method(method, HttpRequest.BodyPublishers.noBody());
+        if (ifMatch != null) request.header("If-Match", ifMatch);
+        return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    @Test
+    void httpPreviewValidatorCanBeSentLiterallyToRestore() throws Exception {
+        String auth = token(AdminPermission.DEMO_RESTORE);
+        HttpResponse<String> preview = http("GET", PREVIEW, auth, null);
+        assertThat(preview.statusCode()).isEqualTo(200);
+        String tag = preview.headers().firstValue("ETag").orElseThrow();
+        assertThat(tag).matches("\"v0-[0-9a-f]{64}\"").doesNotStartWith("W/");
+        assertThat(preview.headers().firstValue("Cache-Control").orElseThrow())
+                .contains("no-store", "no-transform");
+        assertThat(preview.headers().firstValue("Access-Control-Expose-Headers").orElseThrow())
+                .containsIgnoringCase("ETag").containsIgnoringCase("Retry-After");
+        assertThat(http("POST", RESTORE, auth, null).statusCode()).isEqualTo(428);
+        assertThat(http("POST", RESTORE, auth, "W/" + tag).statusCode()).isEqualTo(412);
+
+        HttpResponse<String> restored = http("POST", RESTORE, auth, tag);
+        assertThat(restored.statusCode()).isEqualTo(200);
+        String newTag = restored.headers().firstValue("ETag").orElseThrow();
+        assertThat(newTag).matches("\"v1-[0-9a-f]{64}\"").doesNotStartWith("W/").isNotEqualTo(tag);
+        assertThat(restored.headers().firstValue("Cache-Control").orElseThrow())
+                .contains("no-store", "no-transform");
+        assertThat(http("POST", RESTORE, auth, tag).statusCode()).isEqualTo(412);
     }
 
     @Test
