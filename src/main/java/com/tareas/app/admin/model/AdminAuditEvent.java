@@ -28,10 +28,4 @@ public class AdminAuditEvent {
     private Instant occurredAt;
     @Column(name = "correlation_id", length = 100)
     private String correlationId;
-    @Column(name = "previous_revision")
-    private Long previousRevision;
-    @Column(name = "new_revision")
-    private Long newRevision;
-    @Column(name = "restore_counts", length = 160)
-    private String restoreCounts;
 }
