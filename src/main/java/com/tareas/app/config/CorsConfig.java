@@ -35,7 +35,8 @@ public class CorsConfig implements WebMvcConfigurer {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match"));
+        config.setExposedHeaders(List.of("ETag", "Retry-After"));
         config.setAllowCredentials(false);
         config.setMaxAge(3600L);
 

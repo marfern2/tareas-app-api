@@ -2,6 +2,7 @@ package com.tareas.app.exception;
 
 import com.tareas.app.admin.exception.AdminRefreshTokenNoValidoException;
 import com.tareas.app.admin.exception.AdminRateLimitException;
+import com.tareas.app.demo.service.DemoHttpException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,6 +25,13 @@ import java.util.Map;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(DemoHttpException.class)
+    public ResponseEntity<Map<String, Object>> handleDemo(DemoHttpException ex) {
+        Map<String, Object> r = base(ex.getStatus());
+        r.put("message", ex.getMessage());
+        return new ResponseEntity<>(r, ex.getStatus());
+    }
 
     private Map<String, Object> base(HttpStatus status) {
         Map<String, Object> m = new HashMap<>();
