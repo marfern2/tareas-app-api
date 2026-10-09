@@ -91,6 +91,8 @@ class DemoFixturePostgresqlTest {
     @Test
     void createsStableDraftCatalogAndPreservesCustomAndRealData() throws Exception {
         String auth = token(AdminPermission.DEMO_RESTORE);
+        mvc.perform(get("/api/admin/demo/users").header("Authorization", auth))
+                .andExpect(status().isForbidden());
         long realUsers = jdbc.queryForObject("SELECT count(*) FROM usuarios", Long.class);
         long realTasks = jdbc.queryForObject("SELECT count(*) FROM tareas", Long.class);
         jdbc.update("INSERT INTO demo_users (handle, display_name) VALUES ('custom-fixture-test', 'Custom')");
