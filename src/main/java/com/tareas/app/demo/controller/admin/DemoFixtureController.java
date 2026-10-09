@@ -16,17 +16,18 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/admin/demo/fixtures")
 @RequiredArgsConstructor
 public class DemoFixtureController {
+    private static final CacheControl STRONG_ETAG_CACHE_CONTROL = CacheControl.noStore().noTransform();
     private final DemoFixtureService service;
 
     @GetMapping("/restore-preview")
     public ResponseEntity<Preview> preview() {
         Preview p = service.preview();
-        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).eTag(p.etag()).body(p);
+        return ResponseEntity.ok().cacheControl(STRONG_ETAG_CACHE_CONTROL).eTag(p.etag()).body(p);
     }
 
     @PostMapping("/restore")
     public ResponseEntity<RestoreResult> restore(@RequestHeader(value = "If-Match", required = false) String ifMatch) {
         RestoreResult result = service.restore(ifMatch);
-        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).eTag(result.etag()).body(result);
+        return ResponseEntity.ok().cacheControl(STRONG_ETAG_CACHE_CONTROL).eTag(result.etag()).body(result);
     }
 }

@@ -7,6 +7,7 @@ import com.tareas.app.demo.service.DemoValidation;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,14 +18,16 @@ import java.util.Set;
 @RequestMapping("/api/admin/demo")
 @RequiredArgsConstructor
 public class DemoAdminController {
+    private static final CacheControl STRONG_ETAG_CACHE_CONTROL = CacheControl.noStore().noTransform();
     private final DemoAdminService service;
     private final DemoValidation validation;
 
     private <T> ResponseEntity<T> entity(T body, long version) {
-        return ResponseEntity.ok().eTag("\"v" + version + "\"").body(body);
+        return ResponseEntity.ok().cacheControl(STRONG_ETAG_CACHE_CONTROL).eTag("\"v" + version + "\"").body(body);
     }
     private <T> ResponseEntity<T> created(String path, Long id, T body, long version) {
-        return ResponseEntity.created(URI.create(path + "/" + id)).eTag("\"v" + version + "\"").body(body);
+        return ResponseEntity.created(URI.create(path + "/" + id)).cacheControl(STRONG_ETAG_CACHE_CONTROL)
+                .eTag("\"v" + version + "\"").body(body);
     }
 
     @GetMapping("/users")
