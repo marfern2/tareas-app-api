@@ -82,6 +82,22 @@ Los permisos no se heredan entre sí. `ADMIN_READ`, `USER_WRITE`, `USER_DELETE` 
 comprueban los permisos de forma independiente. Esta fase no asigna permisos DEMO
 a ninguna cuenta.
 
+El backoffice privado obtiene las capacidades actuales mediante
+`GET /api/admin/me` con `Authorization: Bearer <JWT admin>`. La respuesta contiene
+solo `username` y `permissions` (nombres de `AdminPermission`); lleva
+`Cache-Control: no-store`. La cadena admin consulta `admin_permissions` en la
+base de datos en cada solicitud, también cuando se reutiliza un JWT ya emitido.
+Un JWT Android no sirve para esta ruta. Angular debe volver a consultarla tras
+iniciar o renovar sesión y cuando necesite actualizar las capacidades mostradas;
+la autorización efectiva se decide de nuevo en cada petición a la API.
+
+La API autoriza `DEMO_READ`, `DEMO_WRITE`, `DEMO_PUBLISH` y `DEMO_RESTORE` por
+separado. El backoffice interactivo necesita `DEMO_READ` para descubrir y ver
+recursos y obtener sus ETag. Por ello, un rol operativo de edición recibe
+normalmente `DEMO_READ` + `DEMO_WRITE`, y uno de publicación `DEMO_READ` +
+`DEMO_PUBLISH`. `DEMO_WRITE` y `DEMO_PUBLISH` no implican `DEMO_READ`; tampoco
+`DEMO_RESTORE` concede las otras capacidades.
+
 ## DTOs, listas y validación
 
 `POST` requiere todos los campos obligatorios; `PATCH` admite solo los campos
@@ -126,6 +142,12 @@ de relaciones y publicación; la columna `@Version` también protege las escritu
 El orden de bloqueo evita que se publique una tarea mientras se despublica su
 tipo o usuario. Los GET de listas y estadísticas no representan una instantánea
 atómica de todo el catálogo.
+
+El CORS administrativo conserva los orígenes configurados para cada entorno.
+Permite enviar `Authorization`, `Content-Type` e `If-Match` en preflight y expone
+`ETag` y `Retry-After` al navegador. Esto incluye PATCH, DELETE y POST de restore.
+El preview de restore y su respuesta también devuelven ETag. Las respuestas
+administrativas 429 ya incluyen `Retry-After`; no cambian las cuotas.
 
 ## Errores y auditoría
 

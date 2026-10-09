@@ -106,11 +106,15 @@ class DemoAdminIntegrationTest {
                 .content("{}" )).andExpect(status().isForbidden());
         String write = token(AdminPermission.DEMO_WRITE);
         long id = json(user(write, "writer")).get("id").asLong();
+        mvc.perform(get(BASE + "/users").header("Authorization", write)).andExpect(status().isForbidden());
+        mvc.perform(get(BASE + "/users/" + id).header("Authorization", write)).andExpect(status().isForbidden());
         mvc.perform(patch(BASE + "/users/" + id + "/publication").header("Authorization", write)
                 .header("If-Match", "\"v0\"").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"publicationStatus\":\"PUBLISHED\"}" )).andExpect(status().isForbidden());
         String publisher = token(AdminPermission.DEMO_PUBLISH);
         publish(publisher, "users", id, "\"v0\"", "PUBLISHED");
+        mvc.perform(get(BASE + "/users").header("Authorization", publisher)).andExpect(status().isForbidden());
+        mvc.perform(get(BASE + "/users/" + id).header("Authorization", publisher)).andExpect(status().isForbidden());
         mvc.perform(patch(BASE + "/users/" + id).header("Authorization", publisher)
                 .header("If-Match", "\"v1\"").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"displayName\":\"Other\"}" )).andExpect(status().isForbidden());
