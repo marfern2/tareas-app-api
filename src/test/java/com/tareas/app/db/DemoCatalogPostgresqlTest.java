@@ -116,7 +116,7 @@ class DemoCatalogPostgresqlTest {
     @Test
     void v8KeepsBothContextsStructurallySeparate() {
         flyway.validate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
         assertThat(jdbc.queryForList("""
                 SELECT tc.table_name || '->' || ccu.table_name
                 FROM information_schema.table_constraints tc
@@ -224,7 +224,7 @@ class DemoCatalogPostgresqlTest {
         task = tasks.saveAndFlush(task);
         assertThat(tasks.findByPublicId(task.getPublicId())).isPresent();
         assertThat(task.isCompleted()).isFalse();
-        assertThat(control.findAll()).isEmpty();
+        assertThat(control.findAll()).hasSize(1);
 
         jdbc.update("UPDATE demo_users SET version=version+1 WHERE id=?", user.getId());
         user.setDisplayName("stale");

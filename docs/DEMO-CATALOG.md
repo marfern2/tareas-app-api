@@ -1,9 +1,8 @@
 # Catálogo demo
 
 V8 crea `demo_users`, `demo_task_types`, `demo_tasks` y `demo_catalog_control` sin
-insertar datos ni conceder permisos. La API administrativa privada usa únicamente
-las tres primeras tablas. DEV tiene V8 aplicada; PROD sigue en V7. Fixtures,
-restore y permisos reales están pendientes.
+insertar datos ni conceder permisos. V9 añade metadatos y registro de identidad
+para restore. Esta rama no se ha desplegado: DEV tiene V8 y PROD sigue sin la pila demo.
 
 ## API pública de solo lectura
 
@@ -52,7 +51,7 @@ versiones, fechas internas, auditoría ni estado de publicación.
 No se ha añadido límite por IP: requiere comprobar antes la cadena
 Cloudflare/proxy y no confiar en `X-Forwarded-For` sin esa verificación. CORS
 conserva la política actual; un origen para una futura web pública requiere una
-decisión separada. Esta fase no introduce fixtures ni mutaciones públicas.
+decisión separada. Esta fase no introduce mutaciones públicas.
 
 ## Endpoints privados
 
@@ -76,7 +75,7 @@ No existe `DELETE /users/{id}`.
 | `DEMO_READ` | Todos los GET anteriores |
 | `DEMO_WRITE` | POST y PATCH de edición; DELETE de tipos y tareas |
 | `DEMO_PUBLISH` | Solo PATCH de `/publication` |
-| `DEMO_RESTORE` | Reservado, sin endpoint |
+| `DEMO_RESTORE` | Solo preview y restore de fixtures |
 
 Los permisos no se heredan entre sí. `ADMIN_READ`, `USER_WRITE`, `USER_DELETE` y
 `TASK_WRITE` no dan acceso al catálogo demo. La cadena de seguridad y los servicios
@@ -145,9 +144,87 @@ guardan cuerpos, tokens ni contenido de los campos demo.
 
 La FK compuesta `(demo_task_type_id, demo_user_id)` de `demo_tasks` impide asociar
 tipos de otro usuario. Las tablas demo no referencian `usuarios`, `tipos_tarea`
-ni `tareas`. `fixture_key` permanece opcional para una fase posterior y no se
+ni `tareas`. `fixture_key` es opcional para registros personalizados y no se
 expone por la API. V8 amplió `ck_admin_permission` para reconocer los cuatro
 permisos DEMO, sin concederlos. V1–V8 permanecen inmutables.
 
 La imagen bridge que reconoce DEMO es el rollback mínimo seguro para DEV cuando
-V8 ya está aplicada. El restore y los fixtures requieren una fase posterior.
+V8 ya está aplicada.
+
+## Fixtures versionados y restore
+
+La fuente de verdad es [`src/main/resources/demo/catalog-v1.json`](../src/main/resources/demo/catalog-v1.json).
+El manifest tiene versión 1, seis usuarios, doce tipos y veinticuatro tareas
+sintéticas. Cada elemento declara `fixtureKey` y `publicId` UUID literales
+y estables. El backend valida el manifest al construir el servicio: claves y
+UUID únicos, referencias, propietario de cada tipo, fechas, campos obligatorios,
+rangos, colores y límites de texto. Un manifest inválido impide arrancar el
+servicio; nunca se aplica parcialmente. No hay auto-seeding al arrancar.
+
+V9 crea una fila singleton de control con revisión inicial 0. Es metadato,
+no contenido demo. `demo_fixture_registry` registra tipo, clave, UUID e ID SQL
+de cada fixture creado por restore. Solo este registro prueba que una fila es
+gestionada. Una coincidencia de nombre, handle, clave o UUID sin registro se
+presenta como conflicto y no se adopta. Las filas con `fixture_key NULL` y
+las claves ajenas siguen siendo personalizadas y no se editan ni se borran.
+
+`GET /api/admin/demo/fixtures/restore-preview` requiere exclusivamente
+`DEMO_RESTORE`, es de solo lectura y devuelve revisión actual y objetivo
+(actual + 1), versión del manifest, ETag, listas de claves para `create`,
+`update`, `unchanged`, `retired` y `conflicts` por recurso, y el número de
+filas personalizadas. También informa la versión del manifest previamente
+aplicada y conflictos globales; un binario con manifest anterior al ya aplicado
+no puede degradar el catálogo. Una fila se clasifica `update` si cualquier campo
+gestionado difiere, si está publicada o si debe reactivarse. `retired`
+significa que la clave está en el registro pero ya no en el manifest. Se
+reportan conflictos por identidad perdida, colisión con filas no registradas
+y despublicación que ocultaría hijos personalizados publicados. Preview no
+audita por ser una lectura sin mutación; el rate limiter administrativo de
+lecturas sigue aplicándose.
+
+`POST /api/admin/demo/fixtures/restore` requiere exclusivamente
+`DEMO_RESTORE` e `If-Match` con el ETag exacto del preview. Sin cabecera
+responde 428; una revisión o huella obsoleta, 412; conflictos, 409. La huella
+incluye las filas demo y el registro, por lo que también detecta cambios
+manuales aunque la revisión solo avance con restores. El servicio bloquea la
+fila de control, vuelve a calcular el estado y ejecuta todo en una transacción.
+Las mutaciones administrativas demo toman el mismo bloqueo antes de escribir.
+Dos restores con el mismo ETag se serializan: uno puede completar y el otro
+recibe 412. Cada restore exitoso incrementa la revisión exactamente una vez
+y actualiza atómicamente `manifest_version`, `last_restored_at` y
+`last_restore_id`. La respuesta POST devuelve las listas efectivamente
+aplicadas, revisión anterior y nueva, ID de restore y el ETag resultante.
+
+El upsert busca exclusivamente por `fixture_key` registrada. Crea en orden
+usuario → tipo → tarea y restaura los campos del manifest. Verifica que el
+`publicId` de cada fila registrada siga siendo el UUID estable del manifest;
+si cambió, bloquea el restore con conflicto. Las ediciones manuales de campos gestionados
+se pierden al restaurar. Los cambios incrementan la versión de la fila. Todos
+los fixtures activos quedan `DRAFT` y `published_at=NULL`; repetir un
+restore sin diferencias no modifica sus versiones aunque sí avanza la
+revisión de catálogo. La API pública solo muestra `PUBLISHED`, así que
+no aparecen hasta una publicación administrativa explícita.
+
+La política de retiro conserva la fila y su identidad en el registro:
+la pasa a `DRAFT`, la marca inactiva en el registro y no ejecuta `DELETE`.
+Si una futura versión vuelve a incluirla, se reactiva con el mismo ID y UUID.
+Se procesa en orden inverso tarea → tipo → usuario. Si un hijo personalizado
+publicado quedaría oculto al pasar su padre a `DRAFT`, se detiene con 409.
+El restore no toca datos reales ni usa `TRUNCATE`. El catálogo demo de QA
+existente en DEV, con `fixture_key NULL`, queda fuera del alcance.
+
+El POST consume una sola admisión del rate limiter administrativo de escritura;
+el trabajo JDBC interno no hace llamadas REST. Un éxito escribe auditoría en
+la misma transacción: actor, `DEMO_FIXTURE_RESTORE`, resultado, revisión
+anterior y nueva, conteos create/update/delete/unchanged/retired y
+`X-Request-ID` válido o un identificador generado si falta. Un fallo se audita en transacción independiente
+cuando la auditoría está disponible. Un fallo de auditoría del éxito provoca
+rollback de filas, registro y control. No se guardan cuerpos, manifest,
+tokens ni contraseñas.
+
+Limitaciones: la revisión aumenta también en restores idempotentes; el ETag
+es una instantánea del estado demo completo y puede caducar por cambios en
+filas personalizadas. Cambios SQL externos que eludan el bloqueo de control
+no tienen la misma garantía de serialización que la API administrativa.
+V9 debe aplicarse antes de habilitar estos endpoints; esta fase no promueve
+la pila a PROD ni asigna `DEMO_RESTORE` a cuentas reales.
