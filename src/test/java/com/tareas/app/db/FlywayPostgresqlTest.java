@@ -103,8 +103,8 @@ class FlywayPostgresqlTest {
     private PlatformTransactionManager transactionManager;
 
     @Test
-    void bridgeStartsOnV7AndAuthenticatesExistingPermissionSet() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
+    void bridgeStartsOnV8AndAuthenticatesExistingPermissionSet() {
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
         flyway.validate();
 
         String marker = UUID.randomUUID().toString().substring(0, 8);
@@ -322,12 +322,12 @@ class FlywayPostgresqlTest {
     }
 
     @Test
-    @DisplayName("Flyway ejecuta V1 a V7 en PostgreSQL vacio, validate pasa y los repositorios funcionan")
+    @DisplayName("Flyway ejecuta V1 a V8 en PostgreSQL vacio, validate pasa y los repositorios funcionan")
     void migracionDesdeCeroYFuncionamientoBasico() {
-        // 1. flyway_schema_history contiene exactamente V1 a V7 (success=true)
+        // 1. flyway_schema_history contiene exactamente V1 a V8 (success=true)
         List<Map<String, Object>> history = jdbcTemplate.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertThat(history).hasSize(7);
+        assertThat(history).hasSize(9);
         assertThat(history.get(0).get("version")).isEqualTo("1");
         assertThat(history.get(0).get("type")).isEqualTo("SQL");
         assertThat(history.get(0).get("success")).isEqualTo(true);
@@ -346,8 +346,12 @@ class FlywayPostgresqlTest {
         assertThat(history.get(5).get("success")).isEqualTo(true);
         assertThat(history.get(6).get("version")).isEqualTo("7");
         assertThat(history.get(6).get("success")).isEqualTo(true);
+        assertThat(history.get(7).get("version")).isEqualTo("8");
+        assertThat(history.get(7).get("success")).isEqualTo(true);
+        assertThat(history.get(8).get("version")).isEqualTo("9");
+        assertThat(history.get(8).get("success")).isEqualTo(true);
 
-        // 2. Flyway informa V1 a V7 como aplicadas y sin pendientes
+        // 2. Flyway informa V1 a V8 como aplicadas y sin pendientes
         MigrationInfo[] applied = flyway.info().applied();
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "1".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "2".equals(m.getVersion().getVersion()));
@@ -356,6 +360,8 @@ class FlywayPostgresqlTest {
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "5".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "6".equals(m.getVersion().getVersion()));
         assertThat(applied).anyMatch(m -> m.getVersion() != null && "7".equals(m.getVersion().getVersion()));
+        assertThat(applied).anyMatch(m -> m.getVersion() != null && "8".equals(m.getVersion().getVersion()));
+        assertThat(applied).anyMatch(m -> m.getVersion() != null && "9".equals(m.getVersion().getVersion()));
         assertThat(flyway.info().pending()).isEmpty();
 
         // 3. Las tablas existen (Hibernate validate ya ha arrancado el contexto)
