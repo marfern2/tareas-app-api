@@ -44,7 +44,7 @@ class FlywayAdminPermissionsCompatibilityTest {
         Flyway flyway = Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load();
         flyway.migrate();
         flyway.validate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
 
         assertThat(jdbc.queryForObject("SELECT revoked_at IS NOT NULL FROM admin_refresh_tokens "
                 + "WHERE token_hash = 'disabled-before-v6'", Boolean.class)).isTrue();
@@ -54,8 +54,12 @@ class FlywayAdminPermissionsCompatibilityTest {
                 .containsExactly("ADMIN_READ", "TASK_WRITE", "USER_DELETE", "USER_WRITE");
         assertThat(jdbc.queryForList("SELECT DISTINCT permission FROM admin_permissions ORDER BY permission", String.class))
                 .containsExactly("ADMIN_READ", "TASK_WRITE", "USER_DELETE", "USER_WRITE");
+        for (String table : new String[]{"demo_users", "demo_task_types", "demo_tasks", "demo_fixture_registry"}) {
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM " + table, Integer.class)).isZero();
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM demo_catalog_control", Integer.class)).isEqualTo(1);
         assertThatThrownBy(() -> jdbc.update("INSERT INTO admin_permissions (admin_user_id, permission) "
-                + "SELECT id, 'DEMO_READ' FROM admin_users WHERE username='legacy'"))
+                + "SELECT id, 'INVALID' FROM admin_users WHERE username='legacy'"))
                 .isInstanceOf(DataIntegrityViolationException.class);
         jdbc.update("INSERT INTO admin_users (username, email, password_hash) VALUES (?, ?, ?)",
                 "new", "new@example.invalid", "hash");

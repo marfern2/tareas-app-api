@@ -68,10 +68,10 @@ class FlywayBaselineScenarioTest {
 
         flyway.migrate();
 
-        // 4. Historia: BASELINE v1 + SQL V2 a V7 (el baseline salta V1).
+        // 4. Historia: BASELINE v1 + SQL V2 a V9 (el baseline salta V1).
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertThat(history).hasSize(7);
+        assertThat(history).hasSize(9);
         assertThat(history.get(0).get("version")).isEqualTo("1");
         assertThat(history.get(0).get("type")).isEqualTo("BASELINE");
         assertThat(history.get(0).get("success")).isEqualTo(true);
@@ -90,6 +90,10 @@ class FlywayBaselineScenarioTest {
         assertThat(history.get(5).get("success")).isEqualTo(true);
         assertThat(history.get(6).get("version")).isEqualTo("7");
         assertThat(history.get(6).get("success")).isEqualTo(true);
+        assertThat(history.get(7).get("version")).isEqualTo("8");
+        assertThat(history.get(7).get("success")).isEqualTo(true);
+        assertThat(history.get(8).get("version")).isEqualTo("9");
+        assertThat(history.get(8).get("success")).isEqualTo(true);
 
         // 5. No quedan migraciones pendientes
         assertThat(flyway.info().pending()).isEmpty();
