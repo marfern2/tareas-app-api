@@ -1,5 +1,9 @@
 # Catálogo demo: versión puente de permisos
 
+> Documento histórico de la transición previa al catálogo demo. En Donit
+> v1.0.0 PROD ya usa Flyway V9 y las API demo están operativas. La secuencia
+> siguiente describe el orden de despliegue original, no pasos pendientes.
+
 ## Alcance
 
 Esta versión amplía únicamente `AdminPermission` con `DEMO_READ`, `DEMO_WRITE`,

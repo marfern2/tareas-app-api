@@ -1,5 +1,9 @@
 # Seguridad administrativa 2.0
 
+Esta guía describe la administración de datos reales. El catálogo demo de
+Donit v1.0.0 tiene rutas y permisos adicionales documentados en
+[DEMO-CATALOG.md](DEMO-CATALOG.md).
+
 ## Permisos y transición
 
 La API administrativa utiliza exclusivamente JWT admin; los JWT Android siguen en la otra cadena de Spring Security. `ROLE_ADMIN` deja de ser una autorización suficiente. Los privilegios se cargan de `admin_permissions` en cada petición, por lo que un cambio de permisos se aplica también a JWT admin ya emitidos. No hay endpoint HTTP para conceder permisos. La concesión se hace mediante un procedimiento operativo de base de datos, con identidad verificada y revisión, nunca mediante parámetros de petición.
@@ -11,7 +15,7 @@ La API administrativa utiliza exclusivamente JWT admin; los JWT Android siguen e
 | `USER_DELETE` | Borrar usuarios Android y sus recursos y sesiones. |
 | `TASK_WRITE` | Crear, editar y borrar tareas y tipos de usuarios Android. |
 
-La migración V5 registra los cuatro permisos para cada cuenta administrativa **que ya exista al migrar**, pues esas cuentas ya tenían acceso completo. Las cuentas creadas después quedan sin permisos por defecto. El seed optativo de DEV otorga explícitamente los cuatro permisos a sus cuentas admin creadas desde cero, conservando su uso actual; su cuenta de demo es exclusiva de DEV y **no** es la futura demo pública. Antes de habilitar el seed en un DEV recién creado, revisar que sus credenciales sigan siendo privadas. Una cuenta nueva en PROD requiere concesión explícita tras su alta. El rollback de imagen conserva las tablas nuevas; la imagen anterior las ignora y sigue aplicando su antigua política de administración.
+La migración V5 registra los cuatro permisos para cada cuenta administrativa **que ya exista al migrar**, pues esas cuentas ya tenían acceso completo. Las cuentas creadas después quedan sin permisos por defecto. El seed optativo de DEV otorga explícitamente los cuatro permisos a sus cuentas admin creadas desde cero, conservando su uso actual; su cuenta de demo es exclusiva de DEV y distinta del catálogo público actual. Antes de habilitar el seed en un DEV recién creado, revisar que sus credenciales sigan siendo privadas. Una cuenta nueva en PROD requiere concesión explícita tras su alta. El rollback de imagen conserva las tablas nuevas; la imagen anterior las ignora y sigue aplicando su antigua política de administración.
 
 ## Matriz de endpoints
 
@@ -24,7 +28,7 @@ La migración V5 registra los cuatro permisos para cada cuenta administrativa **
 | `PATCH` y `DELETE /api/admin/users/{id}/tasks/{taskId}`, `/api/admin/users/{id}/task-types/{taskTypeId}` | `TASK_WRITE` |
 | `POST /api/admin/auth/login`, `/refresh`, `/logout` | Sin JWT previo; sujetos a sus propios límites y validación de credenciales o refresh token. |
 
-La cadena admin deniega cualquier método o ruta nueva que no esté en la matriz. Los servicios de mutación repiten las comprobaciones de permisos para impedir que otra entrada interna omita la autorización HTTP. Un permiso no se puede añadir con un campo del JSON ni una query string.
+Para los recursos reales de esta matriz, la cadena admin deniega métodos o rutas no autorizados. Las rutas demo tienen su propia matriz en [DEMO-CATALOG.md](DEMO-CATALOG.md). Los servicios de mutación repiten las comprobaciones de permisos para impedir que otra entrada interna omita la autorización HTTP. Un permiso no se puede añadir con un campo del JSON ni una query string.
 
 ## Borrados
 
@@ -57,11 +61,15 @@ El túnel Cloudflare descrito en el repositorio usa `cloudflared` en modo host y
 
 ## Amenazas mitigadas y límites
 
-Se impide que una cuenta admin de solo lectura modifique recursos por API directa, que una ruta admin futura quede abierta por accidente, que un usuario marcado como protegido se borre por error y que un cliente falsifique `X-Forwarded-For` para eludir los límites admin. La separación JWT admin/Android se mantiene. No hay cuentas públicas admin ni endpoints públicos nuevos.
+Se impide que una cuenta admin de solo lectura modifique recursos por API directa, que una ruta admin futura quede abierta por accidente, que un usuario marcado como protegido se borre por error y que un cliente falsifique `X-Forwarded-For` para eludir los límites admin. La separación JWT admin/Android se mantiene. Las rutas públicas de catálogo demo se documentan por separado en [DEMO-CATALOG.md](DEMO-CATALOG.md).
 
-Los límites en memoria no protegen de un ataque distribuido ni agregan cuotas entre procesos: un cliente que pueda alternar réplicas obtiene una cuota por réplica. El cubo global de login o el de una cuenta concreta pueden ser agotados por un atacante y causar 429 temporal a administradores legítimos; una defensa perimetral confiable requeriría coordinación con proxy/Cloudflare. La tabla de auditoría comparte la base de datos de negocio: la retención, exportación inmutable y los permisos SQL separados quedan pendientes. La marca de protección se asigna operativamente a los usuarios concretos que la operación decida conservar y, en DEV, el seeder la aplica solo a fixtures con procedencia registrada. Los permisos revocados se aplican a la siguiente petición; una petición que ya atravesó el filtro de autenticación puede terminar con los permisos observados al comenzar. Antes de promocionar, comprobar en DEV el estado del seed admin y el tráfico real del panel para ajustar umbrales si fuese necesario.
+Los límites en memoria no protegen de un ataque distribuido ni agregan cuotas entre procesos: un cliente que pueda alternar réplicas obtiene una cuota por réplica. El cubo global de login o el de una cuenta concreta pueden ser agotados por un atacante y causar 429 temporal a administradores legítimos; una defensa perimetral confiable requeriría coordinación con proxy/Cloudflare. La tabla de auditoría comparte la base de datos de negocio: la retención, exportación inmutable y los permisos SQL separados quedan pendientes. La marca de protección se asigna operativamente a los usuarios concretos que la operación decida conservar y, en DEV, el seeder la aplica solo a fixtures con procedencia registrada. Los permisos revocados se aplican a la siguiente petición; una petición que ya atravesó el filtro de autenticación puede terminar con los permisos observados al comenzar.
 
-## Contrato propuesto para la demo pública
+## Propuesta histórica para la demo pública
+
+> Este diseño previo de un proveedor simulado en Angular no es la arquitectura
+> desplegada en Donit v1.0.0. La demo pública actual usa tablas demo aisladas y
+> `GET /api/public/demo/**`; consultar [DEMO-CATALOG.md](DEMO-CATALOG.md).
 
 La futura demo de solo lectura debería consumir un proveedor de datos simulados en Angular, respaldado por fixtures estáticos versionados junto al frontend. Así puede ofrecer `users`, `tasks`, `taskTypes` y `metrics` sin credenciales ni consultas a DEV/PROD. Cada entidad debe tener IDs sintéticos estables; tareas y tipos referencian únicamente IDs de usuarios sintéticos. `metrics` contiene totales y agrupaciones derivados de los mismos fixtures. Los métodos del proveedor serán `listUsers`, `getUser`, `listTasks`, `listTaskTypes` y `getMetrics`; no expondrá métodos de escritura. Angular deberá ocultar las acciones de mutación en modo demo y nunca enviar una petición a `/api/admin/**` desde ese modo. No se publica todavía una API pública ni un tercer despliegue. Un proveedor simulado mantiene la forma de los DTO del panel y facilita sustituir datos sintéticos sin riesgo de enrutar una petición a datos reales; endpoints públicos adicionales solo estarían justificados si surgiera una necesidad de servidor verificada.
 

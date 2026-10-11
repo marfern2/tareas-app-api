@@ -8,6 +8,10 @@
 | DEV | `dev` | `https://donit-api-dev.marfern.dev` | `https://admin-dev.marfern.dev` | volumen `tareas-postgres-dev-data` | `<sha40>` |
 | PROD | `prod` | `https://donit-api.marfern.dev` | `https://admin-donit.marfern.dev` | volumen `tareas-postgres-data` | `<sha40>` |
 
+En Donit v1.0.0, PROD ejecuta Flyway V9 y sirve el catálogo demo v1 mediante
+las API pública y privada. La demo web pública está en
+https://admin-donit.marfern.dev/demo.
+
 LOCAL usa `.env.local`; DEV y PROD usan archivos `.env` distintos en sus directorios de servidor. Cada entorno tiene credenciales de base de datos y secretos JWT propios. DEV y PROD tienen contenedores, redes y volúmenes separados; PostgreSQL no publica puerto al host.
 
 Los servicios Compose son `api` y `postgres`. Sus contenedores son `tareas-api-local`/`tareas-postgres-local` en LOCAL, `tareas-api-dev`/`tareas-postgres-dev` en DEV y `tareas-api`/`tareas-postgres` en PROD.
@@ -28,7 +32,7 @@ Flyway crea una base vacia desde V1. El backend queda en 127.0.0.1:8080 y Postgr
 docker compose -f compose.dev.yaml --env-file .env up -d
 ```
 
-El seed solo se ejecuta con perfil `dev` y `DEV_SEED_ENABLED=true`. Es idempotente y exige contraseñas inyectadas por `.env`; nunca se activa en PROD. La cuenta de demostración, si se habilita, es exclusiva de DEV. Con fixtures antiguos sin clave de procedencia, el seeder omite todo el seed y el backend arranca. Seguir la [adopción explícita y verificación DEV](DEV-FIXTURE-PROTECTION.md) para activar la protección.
+El seed de usuarios reales de prueba solo se ejecuta con perfil `dev` y `DEV_SEED_ENABLED=true`. Es idempotente y exige contraseñas inyectadas por `.env`; nunca se activa en PROD. Esa cuenta de prueba, si se habilita, es exclusiva de DEV y distinta del catálogo demo público. Con fixtures antiguos sin clave de procedencia, el seeder omite todo el seed y el backend arranca. Seguir la [adopción explícita y verificación DEV](DEV-FIXTURE-PROTECTION.md) para activar la protección.
 
 ## Migraciones y rollback
 

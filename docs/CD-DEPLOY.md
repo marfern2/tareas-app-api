@@ -20,9 +20,9 @@ Cloudflare ni volúmenes. La imagen no contiene configuración de entorno: el
 perfil Spring, DB, JWT y CORS se inyectan desde el `.env` del servidor.
 
 Los aliases `develop` y `master` apuntan al digest correspondiente, pero el
-poller despliega siempre el tag inmutable SHA completo. Durante el primer
-despliegue se publican además tags de transición compatibles con los pollers
-ya instalados; no son la identidad canónica de la imagen.
+poller despliega siempre el tag inmutable SHA completo. El workflow también
+publica tags de transición compatibles con pollers antiguos; no son la
+identidad canónica de la imagen.
 
 ## GitHub Environments y concurrencia
 

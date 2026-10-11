@@ -1,8 +1,11 @@
-# Catálogo demo
+# Catálogo demo — Donit v1.0.0
 
 V8 crea `demo_users`, `demo_task_types`, `demo_tasks` y `demo_catalog_control` sin
 insertar datos ni conceder permisos. V9 añade metadatos y registro de identidad
-para restore. Esta rama no se ha desplegado: DEV tiene V8 y PROD sigue sin la pila demo.
+para restore. **Estado validado en PROD:** Flyway V9, manifest v1, revisión demo 1,
+42 registros fixture y estadísticas públicas de 6 usuarios, 12 tipos, 24 tareas
+y 8 completadas. Las API pública y privada demo están operativas. Los datos
+reales permanecen intactos.
 
 ## API pública de solo lectura
 
@@ -50,8 +53,8 @@ versiones, fechas internas, auditoría ni estado de publicación.
 
 No se ha añadido límite por IP: requiere comprobar antes la cadena
 Cloudflare/proxy y no confiar en `X-Forwarded-For` sin esa verificación. CORS
-conserva la política actual; un origen para una futura web pública requiere una
-decisión separada. Esta fase no introduce mutaciones públicas.
+conserva la política configurada por entorno. La demo web pública en PROD está
+disponible en https://admin-donit.marfern.dev/demo. No hay mutaciones públicas.
 
 ## Endpoints privados
 
@@ -79,8 +82,8 @@ No existe `DELETE /users/{id}`.
 
 Los permisos no se heredan entre sí. `ADMIN_READ`, `USER_WRITE`, `USER_DELETE` y
 `TASK_WRITE` no dan acceso al catálogo demo. La cadena de seguridad y los servicios
-comprueban los permisos de forma independiente. Esta fase no asigna permisos DEMO
-a ninguna cuenta.
+comprueban los permisos de forma independiente. La migración no asigna permisos
+DEMO a ninguna cuenta; su concesión es una operación administrativa explícita.
 
 El backoffice privado obtiene las capacidades actuales mediante
 `GET /api/admin/me` con `Authorization: Bearer <JWT admin>`. La respuesta contiene
@@ -170,8 +173,8 @@ ni `tareas`. `fixture_key` es opcional para registros personalizados y no se
 expone por la API. V8 amplió `ck_admin_permission` para reconocer los cuatro
 permisos DEMO, sin concederlos. V1–V8 permanecen inmutables.
 
-La imagen bridge que reconoce DEMO es el rollback mínimo seguro para DEV cuando
-V8 ya está aplicada.
+La [imagen puente de permisos](DEMO-PERMISSIONS-BRIDGE.md) conserva valor como
+referencia histórica de compatibilidad de rollback tras V8.
 
 ## Fixtures versionados y restore
 
@@ -248,5 +251,5 @@ Limitaciones: la revisión aumenta también en restores idempotentes; el ETag
 es una instantánea del estado demo completo y puede caducar por cambios en
 filas personalizadas. Cambios SQL externos que eludan el bloqueo de control
 no tienen la misma garantía de serialización que la API administrativa.
-V9 debe aplicarse antes de habilitar estos endpoints; esta fase no promueve
-la pila a PROD ni asigna `DEMO_RESTORE` a cuentas reales.
+V9 ya está aplicada en PROD. La migración no concede `DEMO_RESTORE`; el permiso
+se asigna por separado a las cuentas autorizadas.
