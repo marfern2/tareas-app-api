@@ -1,5 +1,9 @@
 # Protección de fixtures DEV
 
+> La sección de adopción recoge el estado observado en DEV el 7 de octubre de
+> 2026 y el procedimiento propuesto entonces. No describe el estado actual de
+> PROD ni el catálogo público demo de Donit v1.0.0, que usa tablas separadas.
+
 ## Regla
 
 El seeder se registra solo con perfil `dev` sin `prod` y `DEV_SEED_ENABLED=true`. La clave persistente `usuarios.dev_fixture_key` identifica la procedencia; `username`, email, tipos y tareas no la demuestran. V7 añade una columna nullable y única, sin marcar filas existentes. Las filas que cree el seeder reciben:
